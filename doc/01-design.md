@@ -41,6 +41,13 @@ Seasons and Flowers are bonus tiles — drawn and immediately set aside, replace
 3. Three other players open the link and join the room.
 4. Once four players are present, the host can start the game.
 5. If fewer than four humans are available, empty seats can be filled with **robot players** (Phase 5).
+6. **One active tab per user**: Only one browser tab may hold an active socket connection per user. Opening a second tab displaces the first (shows a "Session opened in another tab" notice with a Reconnect option). Incognito windows use separate guest accounts and are unaffected.
+
+### 4.1.1 Seat Assignment
+- The room host is always assigned the **East seat** (seat index 0).
+- Other players fill the next available seat (South → West → North) in order.
+- If the host leaves, the next player becomes host and is reassigned to the East seat.
+- In the room lobby, the current player's seat is visually highlighted (yellow border + "You" label) so they can identify themselves.
 
 ### 4.2 Gameplay Loop (per hand)
 1. **Shuffle & Deal** — 144 tiles shuffled; each player receives 13 tiles (dealer gets 14).

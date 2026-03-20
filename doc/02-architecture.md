@@ -149,10 +149,12 @@ All game events flow over Socket.IO. The server is the **single source of truth*
 
 | Direction | Event | Payload | Description |
 |-----------|-------|---------|-------------|
-| C→S | `room:create` | `{ variant }` | Create a new room |
-| S→C | `room:created` | `{ roomCode, link }` | Room ready |
-| C→S | `room:join` | `{ roomCode, displayName }` | Join existing room |
-| S→C | `room:playerJoined` | `{ players[] }` | Broadcast updated player list |
+| C→S | `room:create` | callback `{ ok, room }` | Create a new room (host gets East seat) |
+| C→S | `room:join` | `roomCode`, callback `{ ok, room }` | Join existing room |
+| C→S | `room:leave` | — | Leave current room |
+| S→C | `room:updated` | `Room` | Broadcast updated room state to all players |
+| S→C | `room:error` | `message` | Error message for the requesting client |
+| S→C | `session:displaced` | — | Notifies a tab that a newer tab has taken over the session |
 | C→S | `game:start` | — | Host starts the game |
 | S→C | `game:state` | `{ hand, discards, melds, wallCount, turnPlayer, ... }` | Full/delta state update (each player only sees their own hand) |
 | C→S | `game:discard` | `{ tileId }` | Discard a tile |
@@ -221,7 +223,8 @@ WALL_EXHAUSTED
 | Tile visibility | Server never sends other players' hidden tiles to a client (except in 破解版 probability data) |
 | Claim validation | Server validates every claim against actual game state |
 | Auth | JWT with short expiry + refresh tokens; bcrypt for passwords |
-| Room access | Room codes are random, unguessable (nanoid, 10 chars) |
+| Room access | Room codes are random, unguessable (nanoid, 6 chars uppercase alpha) |
+| Multi-tab abuse | One active socket per user; duplicate tabs are displaced server-side |
 | Rate limiting | Express rate-limit on HTTP; Socket.IO event throttling |
 | Input sanitization | Validate all socket payloads with zod schemas |
 
@@ -245,9 +248,13 @@ WALL_EXHAUSTED
 
 ### Phase 1 — Foundation
 - Express server with Socket.IO.
-- Room CRUD in Redis.
-- JWT auth (register + guest mode).
+- Room CRUD in Redis (JSON serialized, 2hr TTL).
+- JWT auth (register + guest mode); guest tokens via `/api/auth/guest`.
 - React app with Lobby UI, room creation, join-via-link.
+- **Session displacement**: server tracks one active socket per user (`userSocketMap`). New connections emit `session:displaced` to the old socket before disconnecting it.
+- **Socket-keyed room tracking**: room membership is keyed by `socketId` (not `userId`) so a displaced socket's disconnect does not remove the user from their room.
+- **Host = East**: room creator is always seat 0 (East). On host departure, the new host is reassigned to seat 0.
+- **Self-highlighting**: the current player's seat in the lobby is highlighted with a distinct border and "You" label.
 
 ### Phase 2 — Core Game
 - Game engine in `packages/common`.

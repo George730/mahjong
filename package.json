@@ -1,0 +1,12 @@
+{
+  "name": "mahjong",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["bcrypt", "esbuild", "@esbuild/*"]
+  }
+}
