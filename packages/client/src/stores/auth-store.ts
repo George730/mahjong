@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import type { User, AuthResponse } from "@mahjong/common";
 import { apiFetch } from "../services/api.ts";
+import { useRoomStore } from "./room-store.ts";
 
 interface AuthState {
   token: string | null;
@@ -82,6 +83,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: () => {
+    useRoomStore.getState().disconnect();
     clearPersisted();
     set({ token: null, user: null, error: null });
   },

@@ -10,7 +10,9 @@ export default function LoginPage() {
   const { login, guest, loading, error } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
-  const redirectTo = (location.state as { from?: string })?.from || "/";
+  const from = (location.state as { from?: string })?.from || "/";
+  // Don't redirect back into a room after logout — always go to home
+  const redirectTo = from.startsWith("/room/") ? "/" : from;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -68,4 +68,32 @@ describe("auth-store", () => {
     expect(useAuthStore.getState().user).toBeNull();
     expect(storage.has("auth-token")).toBe(false);
   });
+
+  it("disconnects socket on logout", async () => {
+    const { useRoomStore } = await import("../stores/room-store.ts");
+    const disconnectSpy = vi.spyOn(useRoomStore.getState(), "disconnect");
+
+    storage.set("auth-token", "old-token");
+    useAuthStore.setState({ token: "old-token", user: { id: "1", username: "x", isGuest: false, createdAt: "" } });
+
+    useAuthStore.getState().logout();
+
+    expect(disconnectSpy).toHaveBeenCalled();
+    disconnectSpy.mockRestore();
+  });
+
+  it("clears room state on logout so re-login starts fresh", async () => {
+    const { useRoomStore } = await import("../stores/room-store.ts");
+
+    // Simulate being in a room
+    useRoomStore.setState({
+      room: { code: "ABC123", hostId: "1", status: "waiting", players: [], createdAt: "" },
+    });
+    useAuthStore.setState({ token: "old-token", user: { id: "1", username: "x", isGuest: false, createdAt: "" } });
+
+    useAuthStore.getState().logout();
+
+    expect(useRoomStore.getState().room).toBeNull();
+    expect(useRoomStore.getState().socket).toBeNull();
+  });
 });

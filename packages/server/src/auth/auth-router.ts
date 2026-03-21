@@ -11,65 +11,75 @@ import { signToken } from "./jwt.js";
 export const authRouter = Router();
 
 authRouter.post("/register", async (req, res) => {
-  const parsed = registerSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.errors[0].message });
-    return;
+  try {
+    const parsed = registerSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.errors[0].message });
+      return;
+    }
+
+    const { username, password } = parsed.data;
+
+    const existing = await findUserByUsername(username);
+    if (existing) {
+      res.status(409).json({ error: "Username already taken" });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const dbUser = await createUser(username, passwordHash);
+
+    const user: User = {
+      id: dbUser.id,
+      username: dbUser.username,
+      isGuest: false,
+      createdAt: dbUser.created_at,
+    };
+    const token = signToken({ userId: user.id, username: user.username, isGuest: false });
+
+    const response: AuthResponse = { token, user };
+    res.status(201).json(response);
+  } catch (err) {
+    console.error("Register error:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
-
-  const { username, password } = parsed.data;
-
-  const existing = await findUserByUsername(username);
-  if (existing) {
-    res.status(409).json({ error: "Username already taken" });
-    return;
-  }
-
-  const passwordHash = await bcrypt.hash(password, 10);
-  const dbUser = await createUser(username, passwordHash);
-
-  const user: User = {
-    id: dbUser.id,
-    username: dbUser.username,
-    isGuest: false,
-    createdAt: dbUser.created_at,
-  };
-  const token = signToken({ userId: user.id, username: user.username, isGuest: false });
-
-  const response: AuthResponse = { token, user };
-  res.status(201).json(response);
 });
 
 authRouter.post("/login", async (req, res) => {
-  const parsed = loginSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.errors[0].message });
-    return;
+  try {
+    const parsed = loginSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.errors[0].message });
+      return;
+    }
+
+    const { username, password } = parsed.data;
+    const dbUser = await findUserByUsername(username);
+    if (!dbUser) {
+      res.status(401).json({ error: "Invalid username or password" });
+      return;
+    }
+
+    const valid = await bcrypt.compare(password, dbUser.password_hash);
+    if (!valid) {
+      res.status(401).json({ error: "Invalid username or password" });
+      return;
+    }
+
+    const user: User = {
+      id: dbUser.id,
+      username: dbUser.username,
+      isGuest: false,
+      createdAt: dbUser.created_at,
+    };
+    const token = signToken({ userId: user.id, username: user.username, isGuest: false });
+
+    const response: AuthResponse = { token, user };
+    res.json(response);
+  } catch (err) {
+    console.error("Login error:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
-
-  const { username, password } = parsed.data;
-  const dbUser = await findUserByUsername(username);
-  if (!dbUser) {
-    res.status(401).json({ error: "Invalid username or password" });
-    return;
-  }
-
-  const valid = await bcrypt.compare(password, dbUser.password_hash);
-  if (!valid) {
-    res.status(401).json({ error: "Invalid username or password" });
-    return;
-  }
-
-  const user: User = {
-    id: dbUser.id,
-    username: dbUser.username,
-    isGuest: false,
-    createdAt: dbUser.created_at,
-  };
-  const token = signToken({ userId: user.id, username: user.username, isGuest: false });
-
-  const response: AuthResponse = { token, user };
-  res.json(response);
 });
 
 authRouter.post("/guest", async (_req, res) => {
