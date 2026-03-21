@@ -1,11 +1,10 @@
-// Tests that login redirect does not send users back into a room after logout
+// Tests that login redirect preserves intended destination (including room URLs)
 
 import { describe, it, expect } from "vitest";
 
-// Extracted redirect logic from LoginPage — room URLs should redirect to home
+// Extracted redirect logic from LoginPage
 function resolveRedirect(from: string | undefined): string {
-  const path = from || "/";
-  return path.startsWith("/room/") ? "/" : path;
+  return from || "/";
 }
 
 describe("login redirect logic", () => {
@@ -18,8 +17,8 @@ describe("login redirect logic", () => {
     expect(resolveRedirect("/some-page")).toBe("/some-page");
   });
 
-  it("does not redirect back into a room after logout", () => {
-    expect(resolveRedirect("/room/ABC123")).toBe("/");
-    expect(resolveRedirect("/room/XYZABC")).toBe("/");
+  it("preserves room redirect for shared link flow", () => {
+    expect(resolveRedirect("/room/ABC123")).toBe("/room/ABC123");
+    expect(resolveRedirect("/room/XYZABC")).toBe("/room/XYZABC");
   });
 });

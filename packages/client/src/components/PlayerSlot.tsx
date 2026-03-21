@@ -25,9 +25,9 @@ export default function PlayerSlot({ player, seatIndex, isHost, isSelf }: Player
       <span className="text-xs text-gray-400 mb-2">{WIND_LABELS[seatIndex]}</span>
       {player ? (
         <>
-          <span className={`font-medium ${isSelf ? "text-yellow-300" : ""}`}>{player.username}</span>
+          <span className="font-medium">{player.username}</span>
           {isSelf && <span className="text-xs text-yellow-400 mt-1">You</span>}
-          {isHost && <span className="text-xs text-emerald-400 mt-1">Host</span>}
+          {isHost && <span className={`text-xs mt-1 ${isSelf ? "text-yellow-400" : "text-emerald-400"}`}>Host</span>}
 
         </>
       ) : (

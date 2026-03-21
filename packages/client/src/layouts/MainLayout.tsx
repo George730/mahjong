@@ -1,10 +1,16 @@
 // Shared page shell — header with logo, username, logout button, and <Outlet> for pages
 
-import { Outlet, Link } from "react-router-dom";
+import { Outlet, Link, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../stores/auth-store.ts";
 
 export default function MainLayout() {
   const { user, logout } = useAuthStore();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login", { replace: true });
+  };
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
@@ -16,7 +22,7 @@ export default function MainLayout() {
           <div className="flex items-center gap-4">
             <span className="text-sm text-gray-300">{user.username}</span>
             <button
-              onClick={logout}
+              onClick={handleLogout}
               className="text-sm text-gray-400 hover:text-white"
             >
               Logout
