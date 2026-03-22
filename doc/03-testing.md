@@ -55,7 +55,7 @@
 
 ## 3. Phase 2 — Core Game
 
-### Unit Tests — Tile System
+### 3.1 Step 2A — Tile System (Unit Tests)
 
 | Area | Test Cases |
 |------|-----------|
@@ -65,24 +65,63 @@
 | Tile set | Each suited tile (wan/tiao/tong 1–9) appears exactly 4 times |
 | Tile set | Each wind (东南西北) appears exactly 4 times |
 | Tile set | Each dragon (中发白) appears exactly 4 times |
+| Tile metadata | Each tile has correct suit, rank, and category |
 | Shuffle | Shuffled set has same 144 tiles (different order) |
+| Shuffle | Two shuffles produce different orderings (probabilistic) |
 
-### Unit Tests — Game State
+### 3.2 Step 2B — Game State & Deal (Unit + Integration Tests)
+
+**Unit Tests:**
 
 | Area | Test Cases |
 |------|-----------|
 | Deal | Each player receives 13 tiles; dealer receives 14 |
 | Deal | Dealing removes exactly 53 tiles from wall |
 | Wall | Wall has 91 tiles after deal (144 - 53) |
-| Turn order | Turns cycle E → S → W → N → E |
-| Flower/Season draw | Drawing a bonus tile triggers replacement from wall end |
+| Flower/Season deal | Bonus tiles in initial deal are replaced from wall end |
+| Flower/Season deal | Replacement tile that is also a bonus triggers chained replacement |
+| State machine | Initial state is WAITING; transitions to DEALING on game start |
+| State machine | DEALING transitions to PLAYING after deal completes |
 
-### Unit Tests — Actions
+**Integration Tests:**
 
 | Area | Test Cases |
 |------|-----------|
+| Game start | Host emits `game:start` → all 4 players receive `game:state` with their hands |
+| Game start | Non-host emits `game:start` → server rejects |
+| Game start | `game:start` with < 4 players → server rejects |
+| State privacy | Each player's `game:state` contains only their own hand, not others' |
+| Redis persistence | Game state is stored in `room:{code}:game` after deal |
+
+### 3.3 Step 2C — Draw & Discard Loop (Unit + Integration Tests)
+
+**Unit Tests:**
+
+| Area | Test Cases |
+|------|-----------|
+| Turn order | Turns cycle E → S → W → N → E |
+| Draw | Drawing removes one tile from wall front |
+| Draw | Player hand size increases by 1 after draw |
 | Discard | Player can only discard a tile in their hand |
 | Discard | After discard, hand size decreases by 1 |
+| Discard | Discarded tile appears in player's discard pool |
+| Wall exhaustion | Drawing from empty wall triggers round end (流局) |
+
+**Integration Tests:**
+
+| Area | Test Cases |
+|------|-----------|
+| Turn cycle | Dealer discards → next player draws → discards → turn advances |
+| Invalid action | Client sends discard out of turn → server rejects |
+| Invalid action | Client discards tile not in hand → server rejects |
+| State sync | After each action, all players receive updated public state |
+
+### 3.4 Step 2D — Claims (Unit + Integration Tests)
+
+**Unit Tests:**
+
+| Area | Test Cases |
+|------|-----------|
 | Chow (吃) | Only the next-in-turn player can chow |
 | Chow | Requires two matching sequential tiles in hand |
 | Chow | Chow creates a meld and reduces hand by 2 |
@@ -91,11 +130,21 @@
 | Kong (杠) | Concealed kong: 4 of same tile in hand |
 | Kong | Exposed kong: hold 3, claim 4th from discard |
 | Kong | Promoted kong: add 4th tile to existing pung |
-| Kong | After kong, player draws replacement tile |
+| Kong | After kong, player draws replacement tile from wall end |
 | Claim priority | Win > Kong > Pung > Chow |
 | Claim priority | Multiple pung claims → closest in turn order wins |
 
-### Unit Tests — Win Detection
+**Integration Tests:**
+
+| Area | Test Cases |
+|------|-----------|
+| Claim window | After discard, eligible players receive `game:actionPrompt` |
+| Claim resolution | Two players claim simultaneously → higher priority wins |
+| Claim timeout | No claim within timeout → turn advances normally |
+| Turn transfer | After pung/kong, claiming player becomes active (skip intermediate players) |
+| Chow turn | After chow, claiming player becomes active (was already next) |
+
+### 3.5 Step 2E — Win Detection (Unit Tests)
 
 | Area | Test Cases |
 |------|-----------|
@@ -107,8 +156,9 @@
 | Minimum fan | Win with 7 fan → invalid (below minimum) |
 | Self-drawn win | 自摸 correctly identified |
 | Discard win | 点炮 correctly identified |
+| Win during kong | 抢杠胡 — win by claiming a tile used in promoted kong |
 
-### Unit Tests — Scoring Engine (81 Fan Patterns)
+### 3.6 Step 2F — Scoring Engine (Unit Tests)
 
 This is the most critical test suite. Each of the 81 recognized fan patterns must be tested.
 
@@ -132,21 +182,38 @@ Test strategy:
 - Combination tests: hands that match multiple patterns; verify correct exclusion rules.
 - Edge cases: hands near the boundary of two similar patterns.
 
-### Integration Tests
+### 3.7 Step 2G — Round & Game Flow (Integration Tests)
 
 | Area | Test Cases |
 |------|-----------|
-| Game flow | Start game → deal → full round of draw/discard → win → scores computed |
-| Reconnection | Player disconnects mid-game → reconnects → receives current state |
-| Timeout | Player doesn't act within time limit → auto-discard triggered |
-| Invalid action | Client sends illegal discard → server rejects |
+| Round end | Win declared → `game:roundEnd` sent with fan breakdown and point deltas |
+| Draw game | Wall exhausted → `game:roundEnd` with no winner, no score change |
+| Score settlement | Winner gains points, discarder (点炮) pays full, others pay half (or per rule variant) |
+| Running totals | Scores accumulate correctly across multiple rounds |
+| Dealer rotation | Non-dealer wins → dealer rotates to next seat |
+| Dealer retention | Dealer wins → dealer stays for next round |
+| Wind rotation | After full dealer cycle, round wind advances E→S→W→N |
+| Game end | Final round completes → `game:end` with final standings |
+| Next round | After round end, new round starts with re-shuffle and re-deal |
 
-### E2E Tests
+### 3.8 Step 2H — Timeout & Reconnection (Integration Tests)
+
+| Area | Test Cases |
+|------|-----------|
+| Discard timeout | Player doesn't discard within time limit → server auto-discards |
+| Claim timeout | No claim within claim window → turn advances |
+| Reconnection | Player disconnects mid-game → reconnects → receives full current `game:state` |
+| Reconnection | Game continues during disconnection (timers still run) |
+| Extended absence | Disconnected player's turns are auto-played (discard drawn tile) |
+| Invalid action | Reconnected client sends stale action → server rejects gracefully |
+
+### E2E Tests (Full Phase 2)
 
 | Test | Steps |
 |------|-------|
 | Full hand | 4 browser sessions play through a complete hand to completion |
 | Claim interaction | Player discards → another player pungs → verify turn order updates |
+| Complete game | 4 players play multiple rounds → game ends → final scores displayed |
 
 ---
 

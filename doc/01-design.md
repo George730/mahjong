@@ -47,7 +47,7 @@ Seasons and Flowers are bonus tiles — drawn and immediately set aside, replace
 - The room host is always assigned the **East seat** (seat index 0).
 - Other players fill the next available seat (South → West → North) in order.
 - If the host leaves, the next player becomes host and is reassigned to the East seat.
-- In the room lobby, the current player's seat is visually highlighted (yellow border + "You" label) so they can identify themselves.
+- In the room lobby, the current player's seat is visually highlighted (yellow border + "You" label) so they can identify themselves. The "Host" badge is yellow in the host's own view and green in other players' views. Player names are always white.
 
 ### 4.2 Gameplay Loop (per hand)
 1. **Shuffle & Deal** — 144 tiles shuffled; each player receives 13 tiles (dealer gets 14).
@@ -80,7 +80,15 @@ Seasons and Flowers are bonus tiles — drawn and immediately set aside, replace
 | Phase | Name | Scope | Goal |
 |-------|------|-------|------|
 | 1 | Foundation | Room creation/joining, basic lobby UI, user auth (register + guest) | Players can create, share, and join rooms |
-| 2 | Core Game | Full 普通版 game engine, tile rendering, turn management, discard/claim logic, win detection, scoring | Playable four-player game |
+| **2** | **Core Game** | **Full 普通版 game engine (sub-steps below)** | **Playable four-player game** |
+| 2A | Tile System | Tile types/enums, 144-tile set generation, shuffle | Tiles can be created and randomized |
+| 2B | Game State & Deal | Game state machine, wall, dealing 13/14 tiles, flower/season replacement | Game can start and deal hands |
+| 2C | Draw & Discard Loop | Basic turn cycle (draw → discard → next player), game board UI, tile rendering | Players can take turns drawing and discarding |
+| 2D | Claims | Chow (吃), pung (碰), kong (杠) logic, claim priority resolution, action prompt UI | Players can claim discards to form melds |
+| 2E | Win Detection | Valid hand checking (4 melds + pair, seven pairs, thirteen orphans), self-drawn & discard win, minimum 8-fan gate | Players can declare and win |
+| 2F | Scoring Engine | All 81 fan patterns, exclusion principle, point computation | Winning hands are scored correctly |
+| 2G | Round & Game Flow | Round-end settlement, score display, next-round dealing, wind rotation, game-end condition | Full multi-round game sessions |
+| 2H | Timeout & Reconnection | Auto-discard timer, player reconnection with state recovery | Robust handling of slow/disconnected players |
 | 3 | Polish & Social | Voice chat (WebRTC), animations, sound effects, responsive UI, chat | Complete social experience |
 | 4 | Persistence & Stats | User history, leaderboard, game replay storage | Long-term engagement |
 | 5 | Robot Players | AI opponents with configurable difficulty | Play with fewer than 4 humans |
