@@ -272,13 +272,22 @@ WALL_EXHAUSTED
 - Socket event: host emits `game:start` → server deals and emits `game:state` to each player (each player sees only their own hand + public info).
 
 #### 2C — Table Layout & Live Hand
-First-person mahjong table view and real-time hand broadcasting.
+First-person mahjong table view, CSS 3D tiles, and real-time hand broadcasting.
+
+**CSS 3D tiles:**
+- Tiles are rendered as 3D slabs using CSS `transform-style: preserve-3d` and pseudo-elements.
+- Each tile has three visible faces: **top** (cream with characters or green back), **front edge** (visible thickness, ~4–6px, darker shade), and optionally a **right edge** for perspective depth.
+- Face-up tiles: cream top with Chinese characters + visible front/side thickness.
+- Face-down tiles: green/emerald top + visible front/side thickness.
+- The 3D effect is pure CSS — no images or WebGL. Shadows and gradients enhance the slab appearance.
+- Side-view tiles (left/right players) are rotated so the thickness face and tile back are visible, giving a realistic "row of tiles standing on the table" look.
+- Selected tiles translate upward (existing `-translate-y` behaviour enhanced with 3D lift).
 
 **Table layout (client UI):**
 - One-point-perspective layout mimicking a real mahjong table with the current player seated at the bottom.
-- **Bottom**: player's own hand, face-up, interactive (click to select, drag to reorder).
-- **Left / Right**: side players' hands rendered as face-down tile rows, rotated 90° along the edges.
-- **Top**: opposite player's face-down tile row across the top.
+- **Bottom**: player's own hand, face-up 3D tiles, interactive (click to select, drag to reorder).
+- **Left / Right**: side players' hands rendered as face-down 3D tile rows, rotated 90° along the edges. The tile thickness/side face is visible, giving a realistic profile.
+- **Top**: opposite player's face-down 3D tile row across the top.
 - **Center**: shared area for discard pool (populated in 2D) and wall counter.
 - Each player's exposed melds and bonus tiles are displayed next to their hand.
 - Player name, seat wind, and dealer badge shown at each position.

@@ -18,8 +18,8 @@ export default function RoomPage() {
   const { gameView } = useGameStore();
 
   useEffect(() => {
-    if (token) connect(token);
-  }, [token, connect]);
+    if (token && user) connect(token, user.id);
+  }, [token, user, connect]);
 
   useEffect(() => {
     if (roomCode && token && !room) {
@@ -71,7 +71,7 @@ export default function RoomPage() {
 
   // Show game board when game is in progress
   if (gameView) {
-    return <GameBoard gameView={gameView} userId={user?.id ?? ""} roomCode={room.code} onLeave={handleLeave} />;
+    return <GameBoard gameView={gameView} userId={user?.id ?? ""} roomCode={room.code} roomPlayers={room.players} onLeave={handleLeave} />;
   }
 
   const isHost = user?.id === room.hostId;

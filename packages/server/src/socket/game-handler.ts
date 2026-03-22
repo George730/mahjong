@@ -1,4 +1,4 @@
-// Socket event handler for game:start — validates and initiates a new game
+// Socket event handlers for game:start and cosmetic hand broadcasts (select/reorder)
 
 import type { Server, Socket } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@mahjong/common";
@@ -14,6 +14,7 @@ export function registerGameHandlers(
   socket: TypedSocket,
   getSocketRoom: (socketId: string) => { userId: string; roomCode: string } | undefined,
 ) {
+  // --- Game start ---
   socket.on("game:start", async (callback) => {
     try {
       const entry = getSocketRoom(socket.id);
@@ -26,41 +27,31 @@ export function registerGameHandlers(
         return callback({ ok: false, error: "Room not found" });
       }
 
-      // Only host can start
       if (room.hostId !== socket.user.userId) {
         return callback({ ok: false, error: "Only the host can start the game" });
       }
 
-      // Need exactly 4 players
       if (room.players.length !== MAX_PLAYERS) {
         return callback({ ok: false, error: `Need ${MAX_PLAYERS} players to start` });
       }
 
-      // Cannot start if already playing
       if (room.status !== "waiting") {
         return callback({ ok: false, error: "Game already in progress" });
       }
 
-      // Update room status
       const updatedRoom = await roomService.updateRoomStatus(entry.roomCode, "playing");
       if (!updatedRoom) {
         return callback({ ok: false, error: "Failed to update room" });
       }
 
-      // Sort players by seatIndex to ensure consistent ordering
       const sortedPlayers = [...room.players].sort((a, b) => a.seatIndex - b.seatIndex);
       const playerIds = sortedPlayers.map((p) => p.userId);
 
-      // Start the game (dealer = seat 0 = East = host)
       const { gameState } = gameManager.startGame(playerIds);
-
-      // Persist game state
       await gameManager.saveGameState(entry.roomCode, gameState);
 
-      // Broadcast room status update
       io.to(entry.roomCode).emit("room:updated", updatedRoom);
 
-      // Send per-player views via connected sockets in the room
       const views = gameManager.createPlayerViews(gameState);
       for (const [, s] of io.sockets.sockets) {
         if (s.rooms.has(entry.roomCode)) {
@@ -75,5 +66,31 @@ export function registerGameHandlers(
     } catch (err) {
       callback({ ok: false, error: (err as Error).message });
     }
+  });
+
+  // --- Cosmetic hand broadcasts (relay to other players in room, no server-side mutation) ---
+
+  socket.on("game:tileSelected", (payload) => {
+    const entry = getSocketRoom(socket.id);
+    if (!entry) return;
+    socket.to(entry.roomCode).emit("game:tileSelected", payload);
+  });
+
+  socket.on("game:tileDeselected", (payload) => {
+    const entry = getSocketRoom(socket.id);
+    if (!entry) return;
+    socket.to(entry.roomCode).emit("game:tileDeselected", payload);
+  });
+
+  socket.on("game:handReordered", (payload) => {
+    const entry = getSocketRoom(socket.id);
+    if (!entry) return;
+    socket.to(entry.roomCode).emit("game:handReordered", payload);
+  });
+
+  socket.on("game:tileDragging", (payload) => {
+    const entry = getSocketRoom(socket.id);
+    if (!entry) return;
+    socket.to(entry.roomCode).emit("game:tileDragging", payload);
   });
 }

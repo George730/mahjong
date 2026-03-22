@@ -10,7 +10,7 @@ interface RoomState {
   error: string | null;
   displaced: boolean;
   socket: TypedSocket | null;
-  connect: (token: string) => void;
+  connect: (token: string, userId: string) => void;
   createRoom: () => Promise<void>;
   joinRoom: (code: string) => Promise<void>;
   leaveRoom: () => void;
@@ -23,8 +23,11 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   displaced: false,
   socket: null,
 
-  connect: (token: string) => {
+  connect: (token: string, userId: string) => {
     const sock = getSocket(token);
+    // Prevent duplicate listeners if connect is called again with the same socket
+    const { socket: prevSocket } = get();
+    if (prevSocket === sock) return;
     sock.on("room:updated", (room) => {
       set({ room });
     });
@@ -34,7 +37,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     sock.on("session:displaced", () => {
       set({ displaced: true, room: null, socket: null });
     });
-    useGameStore.getState().bindSocket(sock);
+    useGameStore.getState().bindSocket(sock, userId);
     set({ socket: sock });
   },
 

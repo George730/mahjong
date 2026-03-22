@@ -7,13 +7,13 @@ import { useRoomStore } from "../stores/room-store.ts";
 
 export default function HomePage() {
   const [joinCode, setJoinCode] = useState("");
-  const { token } = useAuthStore();
+  const { token, user } = useAuthStore();
   const { connect, createRoom, joinRoom, room, error, displaced } = useRoomStore();
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (token) connect(token);
-  }, [token, connect]);
+    if (token && user) connect(token, user.id);
+  }, [token, user, connect]);
 
   useEffect(() => {
     if (room) navigate(`/room/${room.code}`);
