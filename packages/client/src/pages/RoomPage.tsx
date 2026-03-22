@@ -5,14 +5,17 @@ import { useParams, useNavigate } from "react-router-dom";
 import { MAX_PLAYERS } from "@mahjong/common";
 import { useAuthStore } from "../stores/auth-store.ts";
 import { useRoomStore } from "../stores/room-store.ts";
+import { useGameStore } from "../stores/game-store.ts";
 import PlayerSlot from "../components/PlayerSlot.tsx";
 import CopyLinkButton from "../components/CopyLinkButton.tsx";
+import GameBoard from "../components/GameBoard.tsx";
 
 export default function RoomPage() {
   const { roomCode } = useParams<{ roomCode: string }>();
   const navigate = useNavigate();
   const { token, user } = useAuthStore();
-  const { room, connect, joinRoom, leaveRoom, error, displaced } = useRoomStore();
+  const { room, socket, connect, joinRoom, leaveRoom, error, displaced } = useRoomStore();
+  const { gameView } = useGameStore();
 
   useEffect(() => {
     if (token) connect(token);
@@ -26,7 +29,13 @@ export default function RoomPage() {
 
   const handleLeave = () => {
     leaveRoom();
+    useGameStore.getState().reset();
     navigate("/");
+  };
+
+  const handleStartGame = async () => {
+    if (!socket) return;
+    await useGameStore.getState().startGame(socket);
   };
 
   if (displaced) {
@@ -60,7 +69,14 @@ export default function RoomPage() {
     );
   }
 
+  // Show game board when game is in progress
+  if (gameView) {
+    return <GameBoard gameView={gameView} userId={user?.id ?? ""} roomCode={room.code} onLeave={handleLeave} />;
+  }
+
   const isHost = user?.id === room.hostId;
+  const isFull = room.players.length === MAX_PLAYERS;
+  const canStart = isHost && isFull && room.status === "waiting";
   const seats = Array.from({ length: MAX_PLAYERS }, (_, i) =>
     room.players.find((p) => p.seatIndex === i),
   );
@@ -100,9 +116,20 @@ export default function RoomPage() {
       </div>
 
       <button
-        disabled
-        className="w-full py-3 bg-gray-700 rounded font-medium text-gray-500 cursor-not-allowed"
-        title={isHost ? "Need 4 players to start" : "Only the host can start the game"}
+        disabled={!canStart}
+        onClick={handleStartGame}
+        className={
+          canStart
+            ? "w-full py-3 bg-emerald-700 hover:bg-emerald-600 rounded font-medium text-white"
+            : "w-full py-3 bg-gray-700 rounded font-medium text-gray-500 cursor-not-allowed"
+        }
+        title={
+          !isHost
+            ? "Only the host can start the game"
+            : !isFull
+              ? "Need 4 players to start"
+              : undefined
+        }
       >
         Start Game
       </button>

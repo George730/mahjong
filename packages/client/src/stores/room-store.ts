@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import type { Room } from "@mahjong/common";
 import { getSocket, disconnectSocket, type TypedSocket } from "../services/socket.ts";
+import { useGameStore } from "./game-store.ts";
 
 interface RoomState {
   room: Room | null;
@@ -33,6 +34,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     sock.on("session:displaced", () => {
       set({ displaced: true, room: null, socket: null });
     });
+    useGameStore.getState().bindSocket(sock);
     set({ socket: sock });
   },
 

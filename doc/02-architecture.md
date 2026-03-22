@@ -271,14 +271,40 @@ WALL_EXHAUSTED
 - Server persists live game state in Redis key `room:{code}:game`.
 - Socket event: host emits `game:start` → server deals and emits `game:state` to each player (each player sees only their own hand + public info).
 
-#### 2C — Draw & Discard Loop
+#### 2C — Table Layout & Live Hand
+First-person mahjong table view and real-time hand broadcasting.
+
+**Table layout (client UI):**
+- One-point-perspective layout mimicking a real mahjong table with the current player seated at the bottom.
+- **Bottom**: player's own hand, face-up, interactive (click to select, drag to reorder).
+- **Left / Right**: side players' hands rendered as face-down tile rows, rotated 90° along the edges.
+- **Top**: opposite player's face-down tile row across the top.
+- **Center**: shared area for discard pool (populated in 2D) and wall counter.
+- Each player's exposed melds and bonus tiles are displayed next to their hand.
+- Player name, seat wind, and dealer badge shown at each position.
+- Seat positions are relative to the viewer: the viewer is always at the bottom regardless of their actual seat wind.
+
+**Live hand broadcast:**
+- New socket events to relay cosmetic hand actions (no tile identities revealed):
+  - `game:tileSelected` (C→S→C): broadcasts the index (position) of the selected tile to other players; they see a face-down tile rise.
+  - `game:tileDeselected` (C→S→C): clears the selection.
+  - `game:handReordered` (C→S→C): broadcasts that tiles at position X and Y were swapped; other players see face-down tiles animate into new positions.
+- Server relays these events to other players in the room without modification. No game-state mutation — purely visual.
+- Security: only positional indices are transmitted, never tile IDs or faces.
+
+**Data model additions (`packages/common/src/types/events.ts`):**
+- `game:tileSelected` payload: `{ seatIndex, tilePosition }`.
+- `game:tileDeselected` payload: `{ seatIndex }`.
+- `game:handReordered` payload: `{ seatIndex, fromPosition, toPosition }`.
+
+#### 2D — Draw & Discard Loop
 - Turn cycle: active player draws from wall → must discard one tile → turn passes to next player (E→S→W→N).
 - Socket events: `game:draw` (S→C, tile drawn), `game:discard` (C→S, tile discarded), `game:state` (S→C, updated state after each action).
 - Server validates all actions (can't discard a tile not in hand, can't act out of turn).
-- Client: `GamePage` route, `GameBoard` component (table layout with 4 sides), `Hand` component (player's tiles, click to select/discard), `TileRenderer` (SVG/CSS tile display), `DiscardPool` (tiles discarded by each player), `WallCounter` (remaining tiles).
-- Zustand `game-store.ts` for client game state.
+- Client: `DiscardPool` component (tiles discarded by each player, placed in center of table layout from 2C), `WallCounter` (remaining tiles). Click-to-discard on selected tile.
+- Zustand `game-store.ts` for client game state (extends store from 2B/2C).
 
-#### 2D — Claims
+#### 2E — Claims
 - After a discard, other players may claim: chow (吃, next-in-turn only, sequential pair in hand), pung (碰, any player, pair in hand), kong (杠, any player, triplet in hand).
 - Claim priority: win > kong > pung > chow. Ties broken by turn proximity.
 - Kong variants: concealed kong (4 in hand), exposed kong (claim discard), promoted kong (add to existing pung). After kong, draw replacement tile.
@@ -286,21 +312,21 @@ WALL_EXHAUSTED
 - Socket events: `game:actionPrompt` (S→C, available actions for a player), `game:claim` (C→S, player's chosen action).
 - Client: `ActionPrompt` component (buttons for available claims: skip / chow / pung / kong / win).
 
-#### 2E — Win Detection
+#### 2F — Win Detection
 - `packages/common/src/rules.ts` — `isWinningHand(tiles, melds)` returns boolean.
 - Valid patterns: standard (4 melds + 1 pair), seven pairs (七对), thirteen orphans (十三幺).
 - Win sources: self-drawn (自摸, draw from wall), discard win (点炮, claim another's discard).
 - Minimum 8-fan gate: a valid hand shape below 8 fan cannot be declared as a win.
 - Server checks win validity on every `game:claim` with action `win`.
 
-#### 2F — Scoring Engine
+#### 2G — Scoring Engine
 - `packages/common/src/scoring.ts` — `scoreFan(hand, melds, winCondition, seatWind, roundWind)` returns `{ patterns: FanPattern[], totalFan: number, points: number }`.
 - All 81 fan patterns implemented and individually tested.
 - Exclusion principle: higher patterns suppress overlapping lower patterns (e.g., 大四喜 excludes 三风刻).
 - Point computation from total fan value.
 - Test fixtures in `packages/common/src/__fixtures__/hands/` — one fixture per fan pattern.
 
-#### 2G — Round & Game Flow
+#### 2H — Round & Game Flow
 - Round-end: winner's score computed, point deltas applied to all four players (winner gains, others pay).
 - Draw game (流局): wall exhausted with no winner — no score change, re-deal.
 - Score display: `ScoreBoard` component shows fan breakdown, point deltas, running totals.
@@ -309,7 +335,7 @@ WALL_EXHAUSTED
 - Game-end condition: configurable number of rounds (default: 1 full wind cycle = 4+ hands).
 - Socket events: `game:roundEnd` (S→C, round results + fan breakdown), `game:end` (S→C, final standings).
 
-#### 2H — Timeout & Reconnection
+#### 2I — Timeout & Reconnection
 - Turn timer: configurable per-action timeout (e.g., 15s for discard, 5s for claims). Server auto-discards a random tile if player times out.
 - Client: `TurnTimer` component showing countdown.
 - Reconnection: if a player disconnects mid-game, their socket re-joins on reconnect. Server sends full `game:state` to the reconnected player. Game continues (timer still runs for disconnected player).

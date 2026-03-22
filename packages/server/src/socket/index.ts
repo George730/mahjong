@@ -4,7 +4,8 @@ import { Server } from "socket.io";
 import type { Server as HttpServer } from "node:http";
 import type { ClientToServerEvents, ServerToClientEvents } from "@mahjong/common";
 import { socketAuthMiddleware } from "./auth-middleware.js";
-import { registerRoomHandlers } from "./room-handler.js";
+import { registerRoomHandlers, getSocketRoom } from "./room-handler.js";
+import { registerGameHandlers } from "./game-handler.js";
 
 // Track one active socket per user — new connection kicks the old one
 const userSocketMap = new Map<string, string>();
@@ -38,6 +39,7 @@ export function createSocketServer(httpServer: HttpServer) {
     });
 
     registerRoomHandlers(io, socket);
+    registerGameHandlers(io, socket, getSocketRoom);
   });
 
   return io;

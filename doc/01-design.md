@@ -83,12 +83,13 @@ Seasons and Flowers are bonus tiles — drawn and immediately set aside, replace
 | **2** | **Core Game** | **Full 普通版 game engine (sub-steps below)** | **Playable four-player game** |
 | 2A | Tile System | Tile types/enums, 144-tile set generation, shuffle | Tiles can be created and randomized |
 | 2B | Game State & Deal | Game state machine, wall, dealing 13/14 tiles, flower/season replacement | Game can start and deal hands |
-| 2C | Draw & Discard Loop | Basic turn cycle (draw → discard → next player), game board UI, tile rendering | Players can take turns drawing and discarding |
-| 2D | Claims | Chow (吃), pung (碰), kong (杠) logic, claim priority resolution, action prompt UI | Players can claim discards to form melds |
-| 2E | Win Detection | Valid hand checking (4 melds + pair, seven pairs, thirteen orphans), self-drawn & discard win, minimum 8-fan gate | Players can declare and win |
-| 2F | Scoring Engine | All 81 fan patterns, exclusion principle, point computation | Winning hands are scored correctly |
-| 2G | Round & Game Flow | Round-end settlement, score display, next-round dealing, wind rotation, game-end condition | Full multi-round game sessions |
-| 2H | Timeout & Reconnection | Auto-discard timer, player reconnection with state recovery | Robust handling of slow/disconnected players |
+| 2C | Table Layout & Live Hand | First-person table view (4 hands around central area), face-down opponent tiles, broadcast select/reorder to other players | Immersive table feel; players can see opponents arranging tiles |
+| 2D | Draw & Discard Loop | Basic turn cycle (draw → discard → next player), discard pool, wall counter | Players can take turns drawing and discarding |
+| 2E | Claims | Chow (吃), pung (碰), kong (杠) logic, claim priority resolution, action prompt UI | Players can claim discards to form melds |
+| 2F | Win Detection | Valid hand checking (4 melds + pair, seven pairs, thirteen orphans), self-drawn & discard win, minimum 8-fan gate | Players can declare and win |
+| 2G | Scoring Engine | All 81 fan patterns, exclusion principle, point computation | Winning hands are scored correctly |
+| 2H | Round & Game Flow | Round-end settlement, score display, next-round dealing, wind rotation, game-end condition | Full multi-round game sessions |
+| 2I | Timeout & Reconnection | Auto-discard timer, player reconnection with state recovery | Robust handling of slow/disconnected players |
 | 3 | Polish & Social | Voice chat (WebRTC), animations, sound effects, responsive UI, chat | Complete social experience |
 | 4 | Persistence & Stats | User history, leaderboard, game replay storage | Long-term engagement |
 | 5 | Robot Players | AI opponents with configurable difficulty | Play with fewer than 4 humans |

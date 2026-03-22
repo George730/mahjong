@@ -93,7 +93,27 @@
 | State privacy | Each player's `game:state` contains only their own hand, not others' |
 | Redis persistence | Game state is stored in `room:{code}:game` after deal |
 
-### 3.3 Step 2C — Draw & Discard Loop (Unit + Integration Tests)
+### 3.3 Step 2C — Table Layout & Live Hand (Unit + Integration Tests)
+
+**Unit Tests:**
+
+| Area | Test Cases |
+|------|-----------|
+| Seat rotation | Viewer at seat 2 (West) sees themselves at bottom, seat 3 at right, seat 0 at top, seat 1 at left |
+| Seat rotation | Viewer at seat 0 (East) sees themselves at bottom, others in correct relative positions |
+| Face-down rendering | Opponent hand renders exactly `handCount` face-down tiles |
+
+**Integration Tests:**
+
+| Area | Test Cases |
+|------|-----------|
+| Tile selected broadcast | Player selects a tile → other 3 players receive `game:tileSelected` with correct seatIndex and tilePosition |
+| Tile deselected broadcast | Player deselects → others receive `game:tileDeselected` |
+| Hand reordered broadcast | Player drags tile from position 2 to position 5 → others receive `game:handReordered` with correct positions |
+| No self-echo | Player who selects/reorders does NOT receive their own broadcast back |
+| Security | Broadcast events contain only positional indices, never tile IDs or faces |
+
+### 3.4 Step 2D — Draw & Discard Loop (Unit + Integration Tests)
 
 **Unit Tests:**
 
@@ -116,7 +136,7 @@
 | Invalid action | Client discards tile not in hand → server rejects |
 | State sync | After each action, all players receive updated public state |
 
-### 3.4 Step 2D — Claims (Unit + Integration Tests)
+### 3.5 Step 2E — Claims (Unit + Integration Tests)
 
 **Unit Tests:**
 
@@ -144,7 +164,7 @@
 | Turn transfer | After pung/kong, claiming player becomes active (skip intermediate players) |
 | Chow turn | After chow, claiming player becomes active (was already next) |
 
-### 3.5 Step 2E — Win Detection (Unit Tests)
+### 3.6 Step 2F — Win Detection (Unit Tests)
 
 | Area | Test Cases |
 |------|-----------|
@@ -158,7 +178,7 @@
 | Discard win | 点炮 correctly identified |
 | Win during kong | 抢杠胡 — win by claiming a tile used in promoted kong |
 
-### 3.6 Step 2F — Scoring Engine (Unit Tests)
+### 3.7 Step 2G — Scoring Engine (Unit Tests)
 
 This is the most critical test suite. Each of the 81 recognized fan patterns must be tested.
 
@@ -182,7 +202,7 @@ Test strategy:
 - Combination tests: hands that match multiple patterns; verify correct exclusion rules.
 - Edge cases: hands near the boundary of two similar patterns.
 
-### 3.7 Step 2G — Round & Game Flow (Integration Tests)
+### 3.8 Step 2H — Round & Game Flow (Integration Tests)
 
 | Area | Test Cases |
 |------|-----------|
@@ -196,7 +216,7 @@ Test strategy:
 | Game end | Final round completes → `game:end` with final standings |
 | Next round | After round end, new round starts with re-shuffle and re-deal |
 
-### 3.8 Step 2H — Timeout & Reconnection (Integration Tests)
+### 3.9 Step 2I — Timeout & Reconnection (Integration Tests)
 
 | Area | Test Cases |
 |------|-----------|

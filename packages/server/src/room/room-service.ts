@@ -107,6 +107,14 @@ export async function leaveRoom(code: string, userId: string): Promise<Room | nu
   return room;
 }
 
+export async function updateRoomStatus(code: string, status: Room["status"]): Promise<Room | null> {
+  const room = await getRoom(code);
+  if (!room) return null;
+  room.status = status;
+  await redis.set(roomKey(code), JSON.stringify(room), "EX", ROOM_TTL_SECONDS);
+  return room;
+}
+
 export async function deleteRoom(code: string): Promise<void> {
   await redis.del(roomKey(code));
 }
