@@ -128,10 +128,13 @@
 
 ### 6.1 Tile Appearance
 
-- Dimensions: **44×60px** (desktop), **32×44px** (mobile).
-- Rounded corners (4px radius).
-- Subtle **3D effect**: light gradient top-to-bottom on face, thin shadow on bottom/right edge to simulate tile thickness.
-- Tile back: solid deep blue with a subtle circular pattern (like traditional mahjong tile backs).
+- 3D mesh: `BoxGeometry` rendered in Three.js via React-Three-Fiber.
+- Material: `MeshStandardMaterial` per face — `roughness: 0.3`, `metalness: 0.05` for a ceramic sheen.
+- Top face: tile face texture (canvas-rendered characters, upgradeable to SVG sprite atlas).
+- Sides: ivory/cream with subtle edge wear.
+- Back: solid deep blue/green with a traditional circular pattern texture.
+- Real shadow casting onto the table surface via Three.js shadow maps.
+- Specular highlights from directional lighting give tiles a physical, tactile feel.
 
 ### 6.2 Tile Face Rendering
 
@@ -151,14 +154,14 @@
 
 | State | Visual Treatment |
 |-------|-----------------|
-| In hand (idle) | Normal rendering |
-| Hovering | Tile lifts up 6px with drop shadow, slight scale (1.05×) |
-| Selected (for discard) | Tile raised 12px above hand line, gold bottom highlight |
-| Just drawn | Brief golden shimmer, placed with slight gap to the right of existing hand |
-| Discarded | Placed in discard pool with a quick toss animation |
-| In meld (exposed) | Grouped together with a bracket/container, slightly smaller scale (0.9×) |
+| In hand (idle) | Normal position on table surface |
+| Hovering | Tile lifts on Y axis + emissive glow |
+| Selected (for discard) | Tile raised higher on Y axis + gold emissive highlight |
+| Just drawn | Golden shimmer (emissive pulse animation), placed with gap to the right of existing hand |
+| Discarded | Tween animation: lift → bezier arc → land in discard pool with slight bounce |
+| In meld (exposed) | Grouped together, slightly smaller scale |
 | Claimed tile (in meld) | Rotated 90° to indicate it came from another player |
-| Flower/Season (set aside) | Displayed in a dedicated bonus area near the player's avatar |
+| Flower/Season (set aside) | Displayed in a dedicated bonus area near the player's seat |
 
 ---
 
@@ -168,12 +171,12 @@
 
 | Action | Animation | Duration | Easing |
 |--------|-----------|----------|--------|
-| **Draw tile** | Tile slides from wall position into hand (right side), golden shimmer on arrival | 400ms | ease-out |
-| **Discard** | Tile lifts from hand, arcs to discard pool position, lands with a subtle bounce | 500ms | cubic-bezier(0.2, 0.8, 0.3, 1) |
-| **Chow (吃)** | Claimed tile slides from discard pool to claimer's meld area; two tiles from hand slide out to join it; the three group together with a snap | 600ms | ease-in-out |
-| **Pung (碰)** | Same as chow but with two tiles from hand; a brief red flash on the meld to draw attention | 600ms | ease-in-out |
-| **Kong (杠)** | Four tiles converge into a stack; a more dramatic golden flash and slight screen shake (subtle, 2px) | 700ms | ease-in-out |
-| **Concealed Kong** | Four tiles in hand flip face-down, slide together, slight glow | 700ms | ease-in-out |
+| **Draw tile** | Tile rises from wall, flips to reveal face, slides into hand with easing; golden emissive shimmer on arrival | 400ms | ease-out |
+| **Discard** | Tile lifts from hand, follows bezier arc to discard pool, lands with slight bounce + shadow | 500ms | cubic-bezier(0.2, 0.8, 0.3, 1) |
+| **Chow (吃)** | Claimed tile slides from discard pool to claimer's meld area; two tiles from hand slide out to join; snap together with flash | 600ms | ease-in-out |
+| **Pung (碰)** | Same as chow but with two tiles from hand; brief red emissive flash on the meld | 600ms | ease-in-out |
+| **Kong (杠)** | Four tiles converge into a stack; dramatic golden flash + particle sparkle ring | 700ms | ease-in-out |
+| **Concealed Kong** | Four tiles in hand flip face-down, slide together, emissive glow | 700ms | ease-in-out |
 | **Flower/Season reveal** | Tile drawn → brief pause face-up in center → slides to bonus area → replacement tile drawn from wall end | 800ms total | ease-in-out |
 
 ### 7.2 Claim Action UI
@@ -209,8 +212,10 @@ When a tile is discarded and the player has valid claims:
 When a player wins:
 
 1. **Screen dim** — table darkens to 40% opacity (300ms fade).
-2. **Winning hand reveal** — tiles fly to center of screen and arrange face-up in a row (600ms).
-3. **Fan banner** — a scrolling golden banner unfurls listing each matched fan pattern with its point value:
+2. **Camera zoom** — camera smoothly zooms to winner's hand position.
+3. **Winning hand reveal** — tiles fly to center of screen and arrange face-up in a row (600ms).
+4. **Particle burst** — gold/red confetti burst (Three.js `Points` or instanced meshes, 1.5s).
+5. **Fan banner** — a scrolling golden banner (HTML overlay) unfurls listing each matched fan pattern with its point value:
    ```
    ╔══════════════════════════════════╗
    ║          🀄  胡了!  🀄           ║
@@ -223,9 +228,8 @@ When a player wins:
    ║   得分:        +108 分           ║
    ╚══════════════════════════════════╝
    ```
-4. **Confetti particles** — brief burst (1.5s), themed in gold and red.
-5. **Score update** — player scores in the scoreboard animate from old value to new value (counter roll-up, 800ms).
-6. **Continue button** — appears after 3 seconds: "下一局 / Next Hand".
+6. **Score update** — player scores in the scoreboard animate from old value to new value (counter roll-up, 800ms).
+7. **Continue button** — appears after 3 seconds: "下一局 / Next Hand".
 
 ### 7.4 Draw Game (流局)
 

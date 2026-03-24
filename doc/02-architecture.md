@@ -25,8 +25,10 @@
 | Layer | Technology | Rationale |
 |-------|-----------|-----------|
 | Frontend | React + TypeScript | Component model fits tile-based UI; strong ecosystem |
-| State management | Zustand | Lightweight, sufficient for game state |
-| Styling | Tailwind CSS | Rapid UI development, responsive utilities |
+| 3D Rendering | Three.js + React-Three-Fiber (R3F) | Mahjong Soul-class 3D visuals; declarative scene graph via R3F |
+| 3D Helpers | @react-three/drei | Pre-built components: Html overlays, shadows, environment maps |
+| State management | Zustand | Lightweight, sufficient for game state; R3F hooks integrate directly |
+| Styling | Tailwind CSS | Rapid UI development for lobby/overlay components |
 | Real-time transport | Socket.IO (WebSocket) | Reliable bidirectional communication with fallback |
 | Voice chat | WebRTC (via PeerJS or simple-peer) | Peer-to-peer audio, low latency |
 | Signaling server | Socket.IO (shared) | Reuse existing WebSocket connection for signaling |
@@ -68,15 +70,23 @@ mahjong/
 │       ├── src/
 │       │   ├── components/       # UI components
 │       │   │   ├── Lobby/
-│       │   │   ├── GameBoard/
-│       │   │   ├── Hand/
-│       │   │   ├── TileRenderer/
+│       │   │   ├── three/        # Three.js 3D rendering layer
+│       │   │   │   ├── GameCanvas.tsx    # R3F <Canvas> mount, scene composition
+│       │   │   │   ├── TileMesh.tsx      # 3D tile (BoxGeometry + materials)
+│       │   │   │   ├── TableMesh.tsx     # Table surface + border meshes
+│       │   │   │   ├── HandLayout.tsx    # Hand tile positioning
+│       │   │   │   ├── SceneLighting.tsx # Lights + shadows
+│       │   │   │   └── animations.ts     # Tween/clock animation helpers
+│       │   │   ├── overlays/     # HTML overlays on 3D canvas
+│       │   │   │   ├── PlayerLabel.tsx
+│       │   │   │   ├── ActionPrompt.tsx
+│       │   │   │   └── ScoreBoard.tsx
 │       │   │   ├── ScoreBoard/
 │       │   │   └── VoiceChat/
 │       │   ├── hooks/            # Custom React hooks
 │       │   ├── stores/           # Zustand stores
 │       │   ├── services/         # Socket.IO client, API calls
-│       │   └── assets/           # Tile images, sounds
+│       │   └── assets/           # Tile textures, sounds
 │       └── package.json
 ├── docker-compose.yml
 └── package.json            # Workspace root
@@ -271,31 +281,51 @@ WALL_EXHAUSTED
 - Server persists live game state in Redis key `room:{code}:game`.
 - Socket event: host emits `game:start` → server deals and emits `game:state` to each player (each player sees only their own hand + public info).
 
-#### 2C — Table Layout & Live Hand
-First-person mahjong table view, CSS 3D tiles, and real-time hand broadcasting.
+#### 2C — Three.js Table & Live Hand
 
-**CSS 3D tiles:**
-- Tiles are rendered as 3D slabs using CSS `transform-style: preserve-3d` and pseudo-elements.
-- Each tile has three visible faces: **top** (cream with characters or green back), **front edge** (visible thickness, ~4–6px, darker shade), and optionally a **right edge** for perspective depth.
-- Face-up tiles: cream top with Chinese characters + visible front/side thickness.
-- Face-down tiles: green/emerald top + visible front/side thickness.
-- The 3D effect is pure CSS — no images or WebGL. Shadows and gradients enhance the slab appearance.
-- Side-view tiles (left/right players) are rotated so the thickness face and tile back are visible, giving a realistic "row of tiles standing on the table" look.
-- Selected tiles translate upward (existing `-translate-y` behaviour enhanced with 3D lift).
+First-person mahjong table view rendered in Three.js via React-Three-Fiber, with real-time hand broadcasting. Divided into 6 sub-phases:
 
-**Table layout (client UI):**
-- One-point-perspective layout mimicking a real mahjong table with the current player seated at the bottom.
-- **Bottom**: player's own hand, face-up 3D tiles, interactive (click to select, drag to reorder).
-- **Left / Right**: side players' hands rendered as face-down 3D tile rows, rotated 90° along the edges. The tile thickness/side face is visible, giving a realistic profile.
-- **Top**: opposite player's face-down 3D tile row across the top.
-- **Center**: shared area for discard pool (populated in 2D) and wall counter.
-- Each player's exposed melds and bonus tiles are displayed next to their hand.
-- Player name, seat wind, and dealer badge shown at each position.
-- Seat positions are relative to the viewer: the viewer is always at the bottom regardless of their actual seat wind.
+#### 2C-1 — Scene Foundation ✅
+- `GameCanvas.tsx` — R3F `<Canvas>` with ACES filmic tone mapping, antialiasing, shadow support.
+- `PerspectiveCamera` at `(0, 8, 9)`, fov 45, ~41° angle looking down at the table.
+- `SceneLighting.tsx` — `DirectionalLight` from `(0, 10, 0)` with 2048px shadow maps, `AmbientLight` (warm fill), `PointLight` at center (warm glow), `HemisphereLight` (sky/ground); optional debug helper.
+- `TableMesh.tsx` — `PlaneGeometry` (10×10) with PBR felt material (`#1a5c38`, roughness 0.85, receiveShadow), 4 wood border boxes + 4 corner blocks (`#8b6914`, roughness 0.6).
+- `SceneDemoPage.tsx` at route `/scene` for dev preview.
 
-**Live hand broadcast:**
-- New socket events to relay cosmetic hand actions (no tile identities revealed):
-  - `game:tileSelected` (C→S→C): broadcasts the index (position) of the selected tile to other players; they see a face-down tile rise.
+#### 2C-2 — Tile Mesh System ✅
+- `TileMesh.tsx` — `BoxGeometry(0.42, 0.58, 0.16)` with 6-face `MeshStandardMaterial` array. Face texture on +Z, back on -Z, ivory sides, matte bottom.
+- `tileTextures.ts` — Canvas-rendered 256px textures for all 42 tile faces (cached by key), back texture (deep blue with border/diamond ornament), side texture (ivory with depth gradient). Correct colors: red wan, green tiao, blue tong, black winds, colored dragons/seasons/flowers.
+- Two orientation modes:
+  - **Standing** (`flat=false`): upright on table, `rotationY` controls face direction. Bottom=0, top=π, left=-π/2, right=π/2.
+  - **Flat** (`flat=true`): lies on table, face texture pointing up (+Y). Used for main player's hand.
+- Tile states: hover (Y lift 0.08 + white emissive), selected (Y lift 0.2 + gold emissive), smooth animation via `useFrame`.
+- Raycaster: `onClick`, `onPointerOver`/`Out` with cursor change. `interactive` prop to disable for opponent tiles.
+- Layout: 18 tiles max per side, left-aligned per player's perspective, corner margin for clearance.
+- `castShadow` + `receiveShadow` enabled.
+
+#### 2C-3 — Hand Layout & Interaction
+- Extract tile positioning logic from `SceneDemoPage` into reusable `HandLayout.tsx` component.
+- Compute positions for 4 sides from game state: player hand (flat, face-up), 3 opponents (standing, facing outward).
+- Wire to Zustand `game-store`: read `handOrder`, `selectedTileId`, `opponentHands`.
+- Tile selection via store's `selectTile()` action.
+- Drag-to-reorder in 3D (R3F pointer events or HTML drag overlay).
+- Handle variable hand sizes (13 initial, 14 after draw, up to 18 with kongs).
+
+#### 2C-4 — Table Layout & HTML Overlays
+- Player name, seat wind (东/南/西/北), and dealer badge (庄) rendered as HTML overlays positioned over each seat via R3F `<Html>`.
+- Turn indicator and active player highlight.
+- Bonus tile display: small flat 3D tiles near each player's seat.
+- Discard pool placeholder in center area.
+
+#### 2C-5 — Game Board Integration
+- Replace the CSS 3D `GameBoard.tsx` with a new component that mounts `GameCanvas` + Three.js scene.
+- Wire `RoomPage.tsx` to render 3D game board when `gameView` is active.
+- Pass `gameView`, `userId`, `roomPlayers` props through to the 3D scene.
+- Preserve header bar (room code, round wind, wall count, leave button) as HTML above canvas.
+
+#### 2C-6 — Broadcast & Sync
+- Socket events to relay cosmetic hand actions (no tile identities revealed):
+  - `game:tileSelected` (C→S→C): broadcasts the index (position) of the selected tile to other players; they see a face-down tile rise in 3D.
   - `game:tileDeselected` (C→S→C): clears the selection.
   - `game:handReordered` (C→S→C): broadcasts that tiles at position X and Y were swapped; other players see face-down tiles animate into new positions.
 - Server relays these events to other players in the room without modification. No game-state mutation — purely visual.
@@ -352,7 +382,8 @@ First-person mahjong table view, CSS 3D tiles, and real-time hand broadcasting.
 
 ### Phase 3 — Polish & Social
 - WebRTC voice chat integration.
-- Tile animations (draw, discard, claim).
+- Three.js tween-based tile animations (draw, discard, claim, win).
+- Three.js particle effects (confetti, sparkle on win/kong).
 - Sound effects.
 - In-game text chat.
 - Mobile-responsive layout.

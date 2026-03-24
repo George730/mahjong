@@ -11,10 +11,13 @@
   },
   "dependencies": {
     "@mahjong/common": "workspace:*",
+    "@react-three/drei": "^9.122.0",
+    "@react-three/fiber": "^8.18.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.27.0",
     "socket.io-client": "^4.8.0",
+    "three": "^0.183.2",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
@@ -23,6 +26,7 @@
     "@testing-library/react": "^16.0.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/three": "^0.183.1",
     "@vitejs/plugin-react": "^4.3.0",
     "jsdom": "^25.0.0",
     "tailwindcss": "^4.0.0",

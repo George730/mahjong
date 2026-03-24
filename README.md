@@ -22,6 +22,7 @@ A web-based four-player Chinese Standard (国标) Mahjong game with real-time mu
 ## Tech Stack
 
 - **Frontend**: React + TypeScript + Tailwind CSS
+- **3D Rendering**: Three.js + React-Three-Fiber + @react-three/drei
 - **Backend**: Node.js + Express + Socket.IO
 - **Database**: PostgreSQL + Redis
 - **Voice**: WebRTC (peer-to-peer)
@@ -38,7 +39,7 @@ A web-based four-player Chinese Standard (国标) Mahjong game with real-time mu
 | 5. Robot Players | AI opponents with configurable difficulty |
 | 6. 破解版 | Real-time win probability engine |
 | 7. 技能版 | Skill card system |
-| 8. UI Polish | Avatars, animations, dark mode, responsive design |
+| 8. UI Polish | Tile art assets, avatars, dark mode, mobile optimization |
 
 ## Documentation
 
@@ -49,6 +50,7 @@ Detailed documentation is in the [`doc/`](doc/) folder:
 - [Testing](doc/03-testing.md) — Test strategy, per-phase test cases, coverage targets
 - [Deployment](doc/04-deployment.md) — Local setup, Docker, CI/CD, infrastructure scaling
 - [UI Design](doc/05-ui-design.md) — Visual design, layouts, animations, sound, assets
+- [Version Plan](doc/06-version-plan.md) — Rendering strategy, Three.js migration, phase breakdown
 
 ## License
 

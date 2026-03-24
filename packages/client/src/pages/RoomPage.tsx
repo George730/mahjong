@@ -2,13 +2,14 @@
 
 import { useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { MAX_PLAYERS } from "@mahjong/common";
+import { MAX_PLAYERS, windForSeat } from "@mahjong/common";
 import { useAuthStore } from "../stores/auth-store.ts";
 import { useRoomStore } from "../stores/room-store.ts";
 import { useGameStore } from "../stores/game-store.ts";
 import PlayerSlot from "../components/PlayerSlot.tsx";
 import CopyLinkButton from "../components/CopyLinkButton.tsx";
-import GameBoard from "../components/GameBoard.tsx";
+import GameCanvas from "../components/three/GameCanvas.tsx";
+import HandLayout from "../components/three/HandLayout.tsx";
 
 export default function RoomPage() {
   const { roomCode } = useParams<{ roomCode: string }>();
@@ -69,9 +70,45 @@ export default function RoomPage() {
     );
   }
 
-  // Show game board when game is in progress
+  const WIND_CN: Record<string, string> = { east: "东", south: "南", west: "西", north: "北" };
+
+  // Show 3D game board when game is in progress
   if (gameView) {
-    return <GameBoard gameView={gameView} userId={user?.id ?? ""} roomCode={room.code} roomPlayers={room.players} onLeave={handleLeave} />;
+    const mySeat = gameView.players.find((p) => p.userId === user?.id);
+    const mySeatIndex = mySeat?.seatIndex ?? 0;
+    const isMyTurn = gameView.currentTurn === mySeatIndex;
+
+    return (
+      <div className="w-full max-w-5xl mx-auto mt-2 px-2 select-none" style={{ minHeight: "85vh" }}>
+        {/* Header bar — HTML above canvas */}
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-sm text-gray-400">
+            Room <span className="text-emerald-400 tracking-widest font-mono">{room.code}</span>
+            <span className="mx-2">·</span>
+            Round: {WIND_CN[gameView.roundWind]}
+            <span className="mx-2">·</span>
+            Wall: {gameView.wallCount}
+            <span className="mx-2">·</span>
+            {isMyTurn ? (
+              <span className="text-yellow-400 font-medium">Your turn</span>
+            ) : (
+              <span className="text-gray-500">{WIND_CN[windForSeat(gameView.currentTurn)]}'s turn</span>
+            )}
+          </div>
+          <button
+            onClick={handleLeave}
+            className="px-3 py-1 bg-red-900/50 hover:bg-red-800/50 rounded text-xs text-red-300"
+          >
+            Leave
+          </button>
+        </div>
+
+        {/* 3D game canvas */}
+        <GameCanvas>
+          <HandLayout />
+        </GameCanvas>
+      </div>
+    );
   }
 
   const isHost = user?.id === room.hostId;

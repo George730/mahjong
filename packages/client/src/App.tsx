@@ -7,6 +7,7 @@ import LoginPage from "./pages/LoginPage.tsx";
 import RegisterPage from "./pages/RegisterPage.tsx";
 import RoomPage from "./pages/RoomPage.tsx";
 import TileDemoPage from "./pages/TileDemoPage.tsx";
+import SceneDemoPage from "./pages/SceneDemoPage.tsx";
 import AuthGuard from "./components/AuthGuard.tsx";
 
 export default function App() {
@@ -16,6 +17,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/tiles" element={<TileDemoPage />} />
+        <Route path="/scene" element={<SceneDemoPage />} />
         <Route
           path="/"
           element={
