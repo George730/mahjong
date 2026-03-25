@@ -2,9 +2,16 @@
 //
 // Reads from Zustand game-store: handOrder, selectedTileId, opponentHands, gameView.
 // Bottom player's tiles lie flat (face-up). Opponents' tiles stand upright (face outward).
-// Supports click-to-select and pointer-drag-to-reorder for the viewer's hand.
+// Supports click-to-select and drag-to-reorder for the viewer's hand.
+//
+// Drag-to-reorder:
+//   pointerDown on a tile starts drag → pointer tracked via raycaster on horizontal
+//   plane → hoverSlot computed from pointer X → non-dragged tiles shift to make a gap
+//   at hoverSlot → dragged tile slides to the gap → pointerUp commits reorder.
 
-import { useRef, useCallback } from "react";
+import { useRef, useState, useEffect, useMemo } from "react";
+import { useFrame, useThree } from "@react-three/fiber";
+import * as THREE from "three";
 import type { Tile, PublicPlayerState } from "@mahjong/common";
 import { seatsFromPerspective } from "@mahjong/common";
 import { useGameStore, type OpponentHandState } from "../../stores/game-store.ts";
@@ -49,6 +56,38 @@ const SIDE_CONFIGS: Record<string, SideConfig> = {
   },
 };
 
+/** Slot X position for the viewer's hand row. */
+function slotX(slot: number): number {
+  return ROW_LEFT + slot * GAP;
+}
+
+/** Convert a world X position to the nearest slot index (clamped). */
+function xToSlot(x: number, maxSlot: number): number {
+  const raw = Math.round((x - ROW_LEFT) / GAP);
+  return Math.max(0, Math.min(maxSlot, raw));
+}
+
+// --- Drag gesture ---
+//
+// pointerDown → "pending" (records start position + tile index)
+// useFrame checks pointer distance from start:
+//   - if distance > DRAG_THRESHOLD → promote to "dragging" (tiles shift, gap opens)
+// pointerUp:
+//   - if still "pending" → treat as click → toggle selection
+//   - if "dragging" → commit reorder
+
+const DRAG_THRESHOLD = 0.15; // world units (~1/3 tile width) before drag activates
+
+interface DragState {
+  fromIndex: number;
+  hoverSlot: number;
+}
+
+interface PendingState {
+  index: number;
+  startX: number; // world X at pointerDown
+}
+
 /** Viewer's own hand — flat tiles with selection and drag-to-reorder. */
 function ViewerHand({
   tiles,
@@ -64,64 +103,130 @@ function ViewerHand({
   onDragHover: (fromIndex: number, hoverIndex: number | null) => void;
 }) {
   const config = SIDE_CONFIGS.bottom;
-  const dragFrom = useRef<number | null>(null);
-  const lastHover = useRef<number | null>(null);
 
-  const handlePointerDown = useCallback((index: number) => {
-    dragFrom.current = index;
-    lastHover.current = null;
-  }, []);
+  // Two-phase gesture state:
+  // pending = pointerDown happened but hasn't moved past threshold yet
+  // drag    = pointer moved past threshold, tiles are shifting
+  const pendingRef = useRef<PendingState | null>(null);
+  const [dragState, setDragState] = useState<DragState | null>(null);
+  const dragStateRef = useRef<DragState | null>(null);
+  dragStateRef.current = dragState;
 
-  const handlePointerMove = useCallback(
-    (index: number) => {
-      if (dragFrom.current === null || dragFrom.current === index) return;
-      if (lastHover.current === index) return;
-      lastHover.current = index;
-      onDragHover(dragFrom.current, index);
-    },
-    [onDragHover],
-  );
+  // Raycaster on horizontal plane at table surface
+  const { camera, pointer } = useThree();
+  const handPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), []);
+  const hitPoint = useMemo(() => new THREE.Vector3(), []);
+  const ray = useMemo(() => new THREE.Raycaster(), []);
 
-  const handlePointerUp = useCallback(
-    (index: number) => {
-      if (dragFrom.current !== null && dragFrom.current !== index) {
-        onReorder(dragFrom.current, index);
+  /** Get current pointer world X via raycaster. */
+  const getPointerX = (): number => {
+    ray.setFromCamera(pointer, camera);
+    ray.ray.intersectPlane(handPlane, hitPoint);
+    return hitPoint.x;
+  };
+
+  // Every frame: check threshold / update hoverSlot
+  useFrame(() => {
+    const worldX = getPointerX();
+
+    // Phase 1: pending — check if pointer moved past threshold
+    if (pendingRef.current && !dragStateRef.current) {
+      const dist = Math.abs(worldX - pendingRef.current.startX);
+      if (dist > DRAG_THRESHOLD) {
+        // Promote to drag
+        const fromIndex = pendingRef.current.index;
+        const hoverSlot = xToSlot(worldX, tiles.length - 1);
+        const state: DragState = { fromIndex, hoverSlot };
+        dragStateRef.current = state;
+        setDragState(state);
+        document.body.style.cursor = "grabbing";
       }
-      if (dragFrom.current !== null) {
-        onDragHover(dragFrom.current, null);
-      }
-      dragFrom.current = null;
-      lastHover.current = null;
-    },
-    [onReorder, onDragHover],
-  );
-
-  // Cancel drag if pointer leaves all tiles
-  const handlePointerCancel = useCallback(() => {
-    if (dragFrom.current !== null) {
-      onDragHover(dragFrom.current, null);
+      return;
     }
-    dragFrom.current = null;
-    lastHover.current = null;
-  }, [onDragHover]);
+
+    // Phase 2: dragging — update hoverSlot
+    const ds = dragStateRef.current;
+    if (!ds) return;
+
+    const newSlot = xToSlot(worldX, tiles.length - 1);
+    if (newSlot !== ds.hoverSlot) {
+      const updated = { ...ds, hoverSlot: newSlot };
+      dragStateRef.current = updated;
+      setDragState(updated);
+      onDragHover(ds.fromIndex, newSlot);
+    }
+  });
+
+  // pointerUp handler on window — resolves click vs drag
+  useEffect(() => {
+    const handleUp = () => {
+      const pending = pendingRef.current;
+      const ds = dragStateRef.current;
+
+      if (ds) {
+        // Was dragging → commit reorder
+        if (ds.fromIndex !== ds.hoverSlot) {
+          onReorder(ds.fromIndex, ds.hoverSlot);
+        }
+        onDragHover(ds.fromIndex, null);
+        dragStateRef.current = null;
+        setDragState(null);
+        document.body.style.cursor = "auto";
+      } else if (pending) {
+        // Never reached threshold → treat as click (toggle selection)
+        const tile = tiles[pending.index];
+        if (tile) {
+          onSelect(selectedTileId === tile.id ? null : tile.id);
+        }
+      }
+
+      pendingRef.current = null;
+    };
+
+    window.addEventListener("pointerup", handleUp);
+    return () => window.removeEventListener("pointerup", handleUp);
+  }, [tiles, selectedTileId, onSelect, onReorder, onDragHover]);
+
+  // Compute display positions for each tile
+  const getPosition = (i: number): [number, number, number] => {
+    if (!dragState) return config.position(i);
+
+    const { fromIndex, hoverSlot } = dragState;
+
+    if (i === fromIndex) {
+      // Dragged tile slides to the gap position
+      return [slotX(hoverSlot), 0, TABLE_EDGE];
+    }
+
+    // Non-dragged tiles: compute slot with gap at hoverSlot
+    const remainingIdx = i < fromIndex ? i : i - 1;
+    const displaySlot = remainingIdx >= hoverSlot ? remainingIdx + 1 : remainingIdx;
+    return [slotX(displaySlot), 0, TABLE_EDGE];
+  };
+
+  const handlePointerDown = (index: number) => {
+    if (dragState) return; // already dragging
+    pendingRef.current = { index, startX: getPointerX() };
+  };
 
   return (
-    <group onPointerMissed={handlePointerCancel}>
-      {tiles.map((tile, i) => (
-        <TileMesh
-          key={tile.id}
-          face={tile.face}
-          flat={config.flat}
-          position={config.position(i)}
-          rotationY={config.rotationY}
-          selected={selectedTileId === tile.id}
-          interactive
-          onClick={() => onSelect(selectedTileId === tile.id ? null : tile.id)}
-          onPointerDown={() => handlePointerDown(i)}
-          onPointerEnter={() => handlePointerMove(i)}
-          onPointerUp={() => handlePointerUp(i)}
-        />
-      ))}
+    <group>
+      {tiles.map((tile, i) => {
+        const isDragging = dragState?.fromIndex === i;
+        return (
+          <TileMesh
+            key={tile.id}
+            face={tile.face}
+            flat={config.flat}
+            position={getPosition(i)}
+            rotationY={config.rotationY}
+            selected={selectedTileId === tile.id}
+            dragging={isDragging}
+            interactive
+            onPointerDown={() => handlePointerDown(i)}
+          />
+        );
+      })}
     </group>
   );
 }

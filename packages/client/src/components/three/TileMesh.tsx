@@ -31,8 +31,10 @@ export const TILE_DEPTH = 0.16;   // Z — thickness (or Y when flat)
 // Animation constants
 const HOVER_LIFT = 0.08;
 const SELECT_LIFT = 0.2;
+const DRAG_LIFT = 0.15;
 const EMISSIVE_HOVER = 0.15;
 const EMISSIVE_SELECT = 0.35;
+const LERP_SPEED = 12;
 
 interface TileMeshProps {
   face?: TileFace;
@@ -42,11 +44,10 @@ interface TileMeshProps {
   /** If true, tile lies flat on the table with face pointing up. */
   flat?: boolean;
   selected?: boolean;
+  /** Tile is being dragged — lifts higher and uses gold glow. */
+  dragging?: boolean;
   onClick?: () => void;
-  /** Pointer events for drag-to-reorder (viewer's hand). */
   onPointerDown?: () => void;
-  onPointerEnter?: () => void;
-  onPointerUp?: () => void;
   /** Disable hover/select interactivity (e.g. for opponent tiles). */
   interactive?: boolean;
 }
@@ -57,14 +58,14 @@ export default function TileMesh({
   rotationY = 0,
   flat = false,
   selected = false,
+  dragging = false,
   onClick,
   onPointerDown,
-  onPointerEnter,
-  onPointerUp,
   interactive = true,
 }: TileMeshProps) {
   const meshRef = useRef<THREE.Mesh>(null!);
   const [hovered, setHovered] = useState(false);
+  const initialized = useRef(false);
 
   // BoxGeometry face order: [+x, -x, +y, -y, +z, -z]
   // +z = front face (character), -z = back face (blue pattern)
@@ -113,8 +114,10 @@ export default function TileMesh({
     ? position[1] + TILE_DEPTH / 2     // flat: half-thickness off the table
     : position[1] + TILE_HEIGHT / 2;   // standing: half-height off the table
 
-  const targetY = baseY
-    + (selected ? SELECT_LIFT : hovered && interactive ? HOVER_LIFT : 0);
+  const lift = dragging ? DRAG_LIFT : selected ? SELECT_LIFT : hovered && interactive ? HOVER_LIFT : 0;
+  const targetX = position[0];
+  const targetY = baseY + lift;
+  const targetZ = position[2];
 
   // Rotation: flat tiles rotate -π/2 around X to lay down, then rotationY for orientation
   const rotX = flat ? -Math.PI / 2 : 0;
@@ -123,22 +126,34 @@ export default function TileMesh({
     if (!meshRef.current) return;
     const mesh = meshRef.current;
 
-    // Smooth Y position
-    mesh.position.y += (targetY - mesh.position.y) * Math.min(1, delta * 12);
+    // First frame: snap to position (avoids lerp from origin)
+    if (!initialized.current) {
+      mesh.position.set(targetX, targetY, targetZ);
+      initialized.current = true;
+      return;
+    }
+
+    // Smooth position interpolation on all axes
+    const speed = Math.min(1, delta * LERP_SPEED);
+    mesh.position.x += (targetX - mesh.position.x) * speed;
+    mesh.position.y += (targetY - mesh.position.y) * speed;
+    mesh.position.z += (targetZ - mesh.position.z) * speed;
 
     // Emissive glow on front face (material index 4 = +z = character face)
-    const targetEmissive = selected
+    const targetEmissive = dragging
       ? EMISSIVE_SELECT
-      : hovered && interactive
-        ? EMISSIVE_HOVER
-        : 0;
+      : selected
+        ? EMISSIVE_SELECT
+        : hovered && interactive
+          ? EMISSIVE_HOVER
+          : 0;
 
     const frontMat = (mesh.material as THREE.MeshStandardMaterial[])[4];
     if (frontMat) {
       const current = frontMat.emissiveIntensity;
       frontMat.emissiveIntensity += (targetEmissive - current) * Math.min(1, delta * 10);
       if (targetEmissive > 0) {
-        frontMat.emissive.set(selected ? "#c9a84c" : "#ffffff");
+        frontMat.emissive.set(dragging || selected ? "#c9a84c" : "#ffffff");
       }
     }
   });
@@ -146,7 +161,6 @@ export default function TileMesh({
   return (
     <mesh
       ref={meshRef}
-      position={[position[0], baseY, position[2]]}
       rotation={[rotX, rotationY, 0]}
       material={materials}
       castShadow
@@ -155,8 +169,6 @@ export default function TileMesh({
       onPointerOver={interactive ? (e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = "pointer"; } : undefined}
       onPointerOut={interactive ? () => { setHovered(false); document.body.style.cursor = "auto"; } : undefined}
       onPointerDown={interactive && onPointerDown ? (e) => { e.stopPropagation(); onPointerDown(); } : undefined}
-      onPointerEnter={interactive && onPointerEnter ? (e) => { e.stopPropagation(); onPointerEnter(); } : undefined}
-      onPointerUp={interactive && onPointerUp ? (e) => { e.stopPropagation(); onPointerUp(); } : undefined}
     >
       <boxGeometry args={[TILE_WIDTH, TILE_HEIGHT, TILE_DEPTH]} />
     </mesh>
