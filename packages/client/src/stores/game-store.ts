@@ -8,6 +8,8 @@ import type { TypedSocket } from "../services/socket.ts";
 export interface OpponentHandState {
   selectedPosition: number | null; // which tile position is raised
   dragging: { fromPosition: number; hoverPosition: number } | null; // live drag state
+  /** Stable tile identities [id0, id1, …] so reorders produce smooth lerp, not snap-back. */
+  tileOrder: number[];
 }
 
 interface GameStoreState {
@@ -82,59 +84,101 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
     // Opponent cosmetic broadcasts
     socket.on("game:tileSelected", (payload) => {
-      set((s) => ({
-        opponentHands: {
-          ...s.opponentHands,
-          [payload.seatIndex]: {
-            ...s.opponentHands[payload.seatIndex],
-            dragging: s.opponentHands[payload.seatIndex]?.dragging ?? null,
-            selectedPosition: payload.tilePosition,
+      set((s) => {
+        const prev = s.opponentHands[payload.seatIndex];
+        return {
+          opponentHands: {
+            ...s.opponentHands,
+            [payload.seatIndex]: {
+              ...prev,
+              tileOrder: prev?.tileOrder ?? [],
+              dragging: prev?.dragging ?? null,
+              selectedPosition: payload.tilePosition,
+            },
           },
-        },
-      }));
+        };
+      });
     });
 
     socket.on("game:tileDeselected", (payload) => {
-      set((s) => ({
-        opponentHands: {
-          ...s.opponentHands,
-          [payload.seatIndex]: {
-            ...s.opponentHands[payload.seatIndex],
-            dragging: s.opponentHands[payload.seatIndex]?.dragging ?? null,
-            selectedPosition: null,
+      set((s) => {
+        const prev = s.opponentHands[payload.seatIndex];
+        return {
+          opponentHands: {
+            ...s.opponentHands,
+            [payload.seatIndex]: {
+              ...prev,
+              tileOrder: prev?.tileOrder ?? [],
+              dragging: prev?.dragging ?? null,
+              selectedPosition: null,
+            },
           },
-        },
-      }));
+        };
+      });
     });
 
     socket.on("game:tileDragging", (payload) => {
-      set((s) => ({
-        opponentHands: {
-          ...s.opponentHands,
-          [payload.seatIndex]: {
-            ...s.opponentHands[payload.seatIndex],
-            selectedPosition: s.opponentHands[payload.seatIndex]?.selectedPosition ?? null,
-            dragging:
-              payload.hoverPosition !== null
-                ? { fromPosition: payload.fromPosition, hoverPosition: payload.hoverPosition }
-                : null,
+      set((s) => {
+        const prev = s.opponentHands[payload.seatIndex];
+        return {
+          opponentHands: {
+            ...s.opponentHands,
+            [payload.seatIndex]: {
+              ...prev,
+              tileOrder: prev?.tileOrder ?? [],
+              selectedPosition: prev?.selectedPosition ?? null,
+              dragging:
+                payload.hoverPosition !== null
+                  ? { fromPosition: payload.fromPosition, hoverPosition: payload.hoverPosition }
+                  : null,
+            },
           },
-        },
-      }));
+        };
+      });
     });
 
     socket.on("game:handReordered", (payload) => {
-      // Clear drag state when the drop completes
-      set((s) => ({
-        opponentHands: {
-          ...s.opponentHands,
-          [payload.seatIndex]: {
-            ...s.opponentHands[payload.seatIndex],
-            selectedPosition: s.opponentHands[payload.seatIndex]?.selectedPosition ?? null,
-            dragging: null,
+      // Apply reorder to tileOrder so React keys stay stable → smooth lerp, no snap-back.
+      // Also shift selectedPosition to track the moved tile.
+      set((s) => {
+        const prev = s.opponentHands[payload.seatIndex];
+        const { fromPosition: from, toPosition: to } = payload;
+
+        // Update tileOrder (initialize lazily from gameView if needed)
+        const prevOrder = prev?.tileOrder?.length
+          ? prev.tileOrder
+          : (() => {
+              const p = s.gameView?.players.find((pl) => pl.seatIndex === payload.seatIndex);
+              return Array.from({ length: p?.handCount ?? 13 }, (_, i) => i);
+            })();
+        const order = [...prevOrder];
+        const [moved] = order.splice(from, 1);
+        order.splice(to, 0, moved);
+
+        // Shift selectedPosition to follow the reorder
+        let sp = prev?.selectedPosition ?? null;
+        if (sp !== null) {
+          if (sp === from) {
+            sp = to;
+          } else if (from < to && sp > from && sp <= to) {
+            sp = sp - 1;
+          } else if (from > to && sp >= to && sp < from) {
+            sp = sp + 1;
+          }
+        }
+
+        return {
+          opponentHands: {
+            ...s.opponentHands,
+            [payload.seatIndex]: {
+              ...prev,
+              selectedPosition: sp,
+              dragging: null,
+              tileOrder: order,
+            },
           },
-        },
-      }));
+        };
+      });
     });
   },
 
@@ -167,7 +211,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   },
 
   reorderHand: (fromIndex: number, toIndex: number) => {
-    const { handOrder, socket, mySeatIndex } = get();
+    const { handOrder, socket, mySeatIndex, selectedTileId } = get();
     if (fromIndex === toIndex) return;
     const updated = [...handOrder];
     const [moved] = updated.splice(fromIndex, 1);
@@ -180,6 +224,14 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         fromPosition: fromIndex,
         toPosition: toIndex,
       });
+
+      // Re-broadcast selected position at its new index so opponents stay in sync
+      if (selectedTileId !== null) {
+        const newPos = updated.indexOf(selectedTileId);
+        if (newPos >= 0) {
+          socket.emit("game:tileSelected", { seatIndex: mySeatIndex, tilePosition: newPos });
+        }
+      }
     }
   },
 

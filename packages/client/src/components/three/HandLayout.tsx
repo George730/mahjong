@@ -133,12 +133,13 @@ function ViewerHand({
     if (pendingRef.current && !dragStateRef.current) {
       const dist = Math.abs(worldX - pendingRef.current.startX);
       if (dist > DRAG_THRESHOLD) {
-        // Promote to drag
+        // Promote to drag — broadcast initial state so opponents see drag start
         const fromIndex = pendingRef.current.index;
         const hoverSlot = xToSlot(worldX, tiles.length - 1);
         const state: DragState = { fromIndex, hoverSlot };
         dragStateRef.current = state;
         setDragState(state);
+        onDragHover(fromIndex, hoverSlot);
         document.body.style.cursor = "grabbing";
       }
       return;
@@ -231,7 +232,12 @@ function ViewerHand({
   );
 }
 
-/** Opponent hand — standing tiles, face outward (viewer sees tile backs). */
+/** Opponent hand — standing tiles, face outward (viewer sees tile backs).
+ *  Shows selection lift and drag-to-reorder gap animation from broadcasts.
+ *
+ *  Uses `tileOrder` (stable identities) as React keys so that after a reorder
+ *  the TileMesh instances keep their identity and lerp smoothly to new slots
+ *  instead of snapping back to old positions. */
 function OpponentHand({
   player,
   opponentState,
@@ -243,16 +249,42 @@ function OpponentHand({
 }) {
   const config = SIDE_CONFIGS[side];
   const selectedPos = opponentState?.selectedPosition ?? null;
+  const drag = opponentState?.dragging ?? null;
+
+  // Stable identity array — survives reorders so React keys produce smooth lerp.
+  // Falls back to sequential [0,1,2,...] if store hasn't been populated yet.
+  const tileOrder =
+    opponentState?.tileOrder?.length === player.handCount
+      ? opponentState.tileOrder
+      : Array.from({ length: player.handCount }, (_, i) => i);
+
+  /** Compute tile position for a given slot — with gap shift when drag is active. */
+  const getPosition = (slot: number): [number, number, number] => {
+    if (!drag) return config.position(slot);
+
+    const { fromPosition, hoverPosition } = drag;
+
+    // Dragged tile slides to the hover slot
+    if (slot === fromPosition) {
+      return config.position(hoverPosition);
+    }
+
+    // Non-dragged tiles: shift to make a gap at hoverPosition
+    const remainingIdx = slot < fromPosition ? slot : slot - 1;
+    const displaySlot = remainingIdx >= hoverPosition ? remainingIdx + 1 : remainingIdx;
+    return config.position(displaySlot);
+  };
 
   return (
     <group>
-      {Array.from({ length: player.handCount }, (_, i) => (
+      {tileOrder.map((tileId, slot) => (
         <TileMesh
-          key={`${side}-${i}`}
-          position={config.position(i)}
+          key={`${side}-${tileId}`}
+          position={getPosition(slot)}
           rotationY={config.rotationY}
           flat={false}
-          selected={selectedPos === i}
+          selected={selectedPos === slot}
+          dragging={drag !== null && slot === drag.fromPosition}
           interactive={false}
         />
       ))}
