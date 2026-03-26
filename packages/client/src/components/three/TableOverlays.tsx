@@ -331,7 +331,107 @@ function BonusTiles({ tiles, side }: { tiles: Tile[]; side: string }) {
   );
 }
 
-/** Root overlay component — renders labels, center indicator, and bonus tiles. */
+// --- Discard area: 4 rows × 5 columns of flat face-up tiles ---
+// Positioned between the center indicator and each player's hand row.
+// Tiles fill left-to-right, top-to-bottom (top = closer to center, bottom = closer to hand).
+
+const DISCARD_COLS = 6;
+const DISCARD_ROWS = 4;
+const DISCARD_TILE_SCALE = 0.75;
+const DISCARD_GAP_X = (TILE_WIDTH + 0.02) * DISCARD_TILE_SCALE;
+const DISCARD_GAP_Z = 0.48 * DISCARD_TILE_SCALE; // row spacing (tile height when flat)
+
+// Discard area center distance from table center (between indicator and hand)
+const DISCARD_CENTER_Z = 2;
+
+interface DiscardConfig {
+  /** Position for tile at (row, col) in world coords. Row 0 is closest to center. */
+  position: (row: number, col: number) => [number, number, number];
+  /** World-Y rotation so tile faces read right-side-up for the owning player. */
+  orientY: number;
+}
+
+const DISCARD_CONFIGS: Record<string, DiscardConfig> = {
+  bottom: {
+    position: (row, col) => {
+      const cx = 0;
+      const cz = DISCARD_CENTER_Z;
+      const x = cx + (col - (DISCARD_COLS - 1) / 2) * DISCARD_GAP_X;
+      // Row 0 closest to center (smallest Z), row N closest to hand (largest Z)
+      const z = cz + (row - (DISCARD_ROWS - 1) / 2) * DISCARD_GAP_Z;
+      return [x, 0.01, z];
+    },
+    orientY: 0,
+  },
+  top: {
+    position: (row, col) => {
+      const cx = 0;
+      const cz = -DISCARD_CENTER_Z;
+      const x = cx - (col - (DISCARD_COLS - 1) / 2) * DISCARD_GAP_X;
+      // Row 0 closest to center (largest Z), row N closest to hand (smallest Z)
+      const z = cz - (row - (DISCARD_ROWS - 1) / 2) * DISCARD_GAP_Z;
+      return [x, 0.01, z];
+    },
+    orientY: Math.PI,
+  },
+  left: {
+    position: (row, col) => {
+      const cx = -DISCARD_CENTER_Z;
+      const cz = 0;
+      const z = cz + (col - (DISCARD_COLS - 1) / 2) * DISCARD_GAP_X;
+      // Row 0 closest to center (largest X), row N closest to hand (smallest X)
+      const x = cx - (row - (DISCARD_ROWS - 1) / 2) * DISCARD_GAP_Z;
+      return [x, 0.01, z];
+    },
+    orientY: -Math.PI / 2,
+  },
+  right: {
+    position: (row, col) => {
+      const cx = DISCARD_CENTER_Z;
+      const cz = 0;
+      const z = cz - (col - (DISCARD_COLS - 1) / 2) * DISCARD_GAP_X;
+      // Row 0 closest to center (smallest X), row N closest to hand (largest X)
+      const x = cx + (row - (DISCARD_ROWS - 1) / 2) * DISCARD_GAP_Z;
+      return [x, 0.01, z];
+    },
+    orientY: Math.PI / 2,
+  },
+};
+
+/** Discard area — flat face-up tiles in a grid in front of each player. */
+function DiscardArea({ tiles, side }: { tiles: Tile[]; side: string }) {
+  const config = DISCARD_CONFIGS[side];
+  if (!config || !tiles.length) return null;
+
+  return (
+    <group scale={[DISCARD_TILE_SCALE, DISCARD_TILE_SCALE, DISCARD_TILE_SCALE]}>
+      {tiles.map((tile, i) => {
+        const row = Math.floor(i / DISCARD_COLS);
+        const col = i % DISCARD_COLS;
+        if (row >= DISCARD_ROWS) return null; // overflow protection
+        const worldPos = config.position(row, col);
+        const localPos: [number, number, number] = [
+          worldPos[0] / DISCARD_TILE_SCALE,
+          worldPos[1] / DISCARD_TILE_SCALE,
+          worldPos[2] / DISCARD_TILE_SCALE,
+        ];
+        return (
+          <group key={tile.id} position={localPos} rotation={[0, config.orientY, 0]}>
+            <TileMesh
+              face={tile.face}
+              flat
+              position={[0, 0, 0]}
+              rotationY={0}
+              interactive={false}
+            />
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
+/** Root overlay component — renders labels, center indicator, bonus tiles, and discard areas. */
 export default function TableOverlays() {
   const gameView = useGameStore((s) => s.gameView);
   const mySeatIndex = useGameStore((s) => s.mySeatIndex);
@@ -396,6 +496,7 @@ export default function TableOverlays() {
               />
             )}
             <BonusTiles tiles={player.bonusTiles} side={side} />
+            <DiscardArea tiles={player.discards} side={side} />
           </group>
         );
       })}

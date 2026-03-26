@@ -1,7 +1,7 @@
 // Server-side game manager — starts games, persists state to Redis, sends player views
 
 import type { GameState } from "@mahjong/common";
-import { deal, createPlayerView } from "@mahjong/common";
+import { deal, createPlayerView, drawTile, discardTile } from "@mahjong/common";
 import { redis } from "../redis.js";
 
 const GAME_TTL_SECONDS = 4 * 60 * 60; // 4 hours
@@ -48,4 +48,20 @@ export function createPlayerViews(gameState: GameState): Map<string, ReturnType<
     views.set(player.userId, createPlayerView(gameState, player.seatIndex));
   }
   return views;
+}
+
+/**
+ * Draws a tile for the current player. Returns the updated game state.
+ */
+export function handleDrawTile(gameState: GameState): GameState {
+  drawTile(gameState); // mutates in place
+  return gameState;
+}
+
+/**
+ * Discards a tile from the current player. Returns the updated game state.
+ */
+export function handleDiscardTile(gameState: GameState, tileId: number): GameState {
+  discardTile(gameState, tileId); // mutates in place
+  return gameState;
 }

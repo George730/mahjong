@@ -68,6 +68,78 @@ export function registerGameHandlers(
     }
   });
 
+  // --- Draw tile ---
+  socket.on("game:drawTile", async (callback) => {
+    try {
+      const entry = getSocketRoom(socket.id);
+      if (!entry) return callback({ ok: false, error: "You are not in a room" });
+
+      const gameState = await gameManager.getGameState(entry.roomCode);
+      if (!gameState) return callback({ ok: false, error: "No active game" });
+
+      const player = gameState.players.find((p) => p.userId === socket.user.userId);
+      if (!player) return callback({ ok: false, error: "You are not in this game" });
+      if (gameState.currentTurn !== player.seatIndex) {
+        return callback({ ok: false, error: "Not your turn" });
+      }
+      if (gameState.turnPhase !== "draw") {
+        return callback({ ok: false, error: "Not in draw phase" });
+      }
+
+      gameManager.handleDrawTile(gameState);
+      await gameManager.saveGameState(entry.roomCode, gameState);
+
+      // Broadcast updated views to all players
+      const views = gameManager.createPlayerViews(gameState);
+      for (const [, s] of io.sockets.sockets) {
+        if (s.rooms.has(entry.roomCode)) {
+          const view = views.get(s.user?.userId);
+          if (view) s.emit("game:state", view);
+        }
+      }
+
+      callback({ ok: true });
+    } catch (err) {
+      callback({ ok: false, error: (err as Error).message });
+    }
+  });
+
+  // --- Discard tile ---
+  socket.on("game:discardTile", async (payload, callback) => {
+    try {
+      const entry = getSocketRoom(socket.id);
+      if (!entry) return callback({ ok: false, error: "You are not in a room" });
+
+      const gameState = await gameManager.getGameState(entry.roomCode);
+      if (!gameState) return callback({ ok: false, error: "No active game" });
+
+      const player = gameState.players.find((p) => p.userId === socket.user.userId);
+      if (!player) return callback({ ok: false, error: "You are not in this game" });
+      if (gameState.currentTurn !== player.seatIndex) {
+        return callback({ ok: false, error: "Not your turn" });
+      }
+      if (gameState.turnPhase !== "discard") {
+        return callback({ ok: false, error: "Not in discard phase" });
+      }
+
+      gameManager.handleDiscardTile(gameState, payload.tileId);
+      await gameManager.saveGameState(entry.roomCode, gameState);
+
+      // Broadcast updated views to all players
+      const views = gameManager.createPlayerViews(gameState);
+      for (const [, s] of io.sockets.sockets) {
+        if (s.rooms.has(entry.roomCode)) {
+          const view = views.get(s.user?.userId);
+          if (view) s.emit("game:state", view);
+        }
+      }
+
+      callback({ ok: true });
+    } catch (err) {
+      callback({ ok: false, error: (err as Error).message });
+    }
+  });
+
   // --- Cosmetic hand broadcasts (relay to other players in room, no server-side mutation) ---
 
   socket.on("game:tileSelected", (payload) => {

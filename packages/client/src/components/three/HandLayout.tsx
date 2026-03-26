@@ -83,15 +83,20 @@ interface PendingState {
   startX: number; // world X at pointerDown
 }
 
+/** Gap between main hand and drawn tile (in tile widths). */
+const DRAWN_TILE_GAP = 0.2;
+
 /** Viewer's own hand — flat tiles with selection and drag-to-reorder. */
 function ViewerHand({
   tiles,
+  drawnTile,
   selectedTileId,
   onSelect,
   onReorder,
   onDragHover,
 }: {
   tiles: Tile[];
+  drawnTile: Tile | null;
   selectedTileId: number | null;
   onSelect: (tileId: number | null) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
@@ -205,6 +210,9 @@ function ViewerHand({
     pendingRef.current = { index, startX: getPointerX() };
   };
 
+  // Position for the drawn tile: to the right of the last hand tile with a gap
+  const drawnTileX = ROW_LEFT + tiles.length * GAP + DRAWN_TILE_GAP;
+
   return (
     <group>
       {tiles.map((tile, i) => {
@@ -223,6 +231,19 @@ function ViewerHand({
           />
         );
       })}
+      {/* Drawn tile — shown to the right with a gap */}
+      {drawnTile && (
+        <TileMesh
+          key={`drawn-${drawnTile.id}`}
+          face={drawnTile.face}
+          flat={config.flat}
+          position={[drawnTileX, 0, TABLE_EDGE]}
+          rotationY={config.rotationY}
+          selected={selectedTileId === drawnTile.id}
+          interactive
+          onClick={() => onSelect(drawnTile.id)}
+        />
+      )}
     </group>
   );
 }
@@ -270,6 +291,20 @@ function OpponentHand({
     return config.position(displaySlot);
   };
 
+  // Position for opponent's drawn tile: after the last hand tile with a gap
+  const drawnTileSlot = player.handCount;
+  const drawnPos = config.position(drawnTileSlot);
+  // Shift the drawn tile further along the row axis to create a gap
+  const drawnOffset = DRAWN_TILE_GAP;
+  let drawnTilePos: [number, number, number];
+  if (side === "top") {
+    drawnTilePos = [drawnPos[0] - drawnOffset, drawnPos[1], drawnPos[2]];
+  } else if (side === "left") {
+    drawnTilePos = [drawnPos[0], drawnPos[1], drawnPos[2] + drawnOffset];
+  } else {
+    drawnTilePos = [drawnPos[0], drawnPos[1], drawnPos[2] - drawnOffset];
+  }
+
   return (
     <group>
       {tileOrder.map((tileId, slot) => (
@@ -283,6 +318,16 @@ function OpponentHand({
           interactive={false}
         />
       ))}
+      {/* Opponent's drawn tile — shown with a gap */}
+      {player.hasDrawnTile && (
+        <TileMesh
+          key={`${side}-drawn`}
+          position={drawnTilePos}
+          rotationY={config.rotationY}
+          flat={false}
+          interactive={false}
+        />
+      )}
     </group>
   );
 }
@@ -321,6 +366,7 @@ export default function HandLayout() {
       {/* Viewer's hand */}
       <ViewerHand
         tiles={orderedHand}
+        drawnTile={gameView.drawnTile}
         selectedTileId={selectedTileId}
         onSelect={selectTile}
         onReorder={reorderHand}

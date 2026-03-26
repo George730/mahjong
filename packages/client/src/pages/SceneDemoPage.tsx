@@ -125,13 +125,15 @@ function useMockGameState() {
 
     const mockView: PlayerGameView = {
       phase: "playing",
+      turnPhase: "discard",
       hand,
+      drawnTile: null,
       bonusTiles: myBonus,
       players: [
-        { userId: "me", seatIndex: 0, handCount: 14, bonusTiles: myBonus, discards: [], melds: [] },
-        { userId: "opp1", seatIndex: 1, handCount: 13, bonusTiles: opp1Bonus, discards: [], melds: [] },
-        { userId: "opp2", seatIndex: 2, handCount: 13, bonusTiles: opp2Bonus, discards: [], melds: [] },
-        { userId: "opp3", seatIndex: 3, handCount: 13, bonusTiles: opp3Bonus, discards: [], melds: [] },
+        { userId: "me", seatIndex: 0, handCount: 14, hasDrawnTile: false, bonusTiles: myBonus, discards: [], melds: [] },
+        { userId: "opp1", seatIndex: 1, handCount: 13, hasDrawnTile: false, bonusTiles: opp1Bonus, discards: [], melds: [] },
+        { userId: "opp2", seatIndex: 2, handCount: 13, hasDrawnTile: false, bonusTiles: opp2Bonus, discards: [], melds: [] },
+        { userId: "opp3", seatIndex: 3, handCount: 13, hasDrawnTile: false, bonusTiles: opp3Bonus, discards: [], melds: [] },
       ],
       wallCount: 88,
       currentTurn: 0,

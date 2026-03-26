@@ -26,6 +26,12 @@ export interface TileDraggingPayload {
   hoverPosition: number | null; // null = drag ended
 }
 
+// --- Draw & discard payloads ---
+
+export interface DiscardTilePayload {
+  tileId: number; // ID of the tile to discard
+}
+
 // --- Socket.IO event maps ---
 
 export interface ServerToClientEvents {
@@ -50,6 +56,13 @@ export interface ClientToServerEvents {
   ) => void;
   "room:leave": () => void;
   "game:start": (
+    callback: (response: { ok: true } | { ok: false; error: string }) => void,
+  ) => void;
+  "game:drawTile": (
+    callback: (response: { ok: true } | { ok: false; error: string }) => void,
+  ) => void;
+  "game:discardTile": (
+    payload: DiscardTilePayload,
     callback: (response: { ok: true } | { ok: false; error: string }) => void,
   ) => void;
   "game:tileSelected": (payload: TileSelectedPayload) => void;

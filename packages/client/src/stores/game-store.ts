@@ -16,7 +16,7 @@ interface GameStoreState {
   gameView: PlayerGameView | null;
   /** Local hand order (tile IDs). Survives server state updates. */
   handOrder: number[];
-  /** Selected tile ID in own hand. */
+  /** Selected tile ID in own hand or drawn tile. */
   selectedTileId: number | null;
   /** Opponent cosmetic states keyed by seatIndex. */
   opponentHands: Record<number, OpponentHandState>;
@@ -29,6 +29,8 @@ interface GameStoreState {
   selectTile: (tileId: number | null) => void;
   emitDragHover: (fromIndex: number, hoverIndex: number | null) => void;
   reorderHand: (fromIndex: number, toIndex: number) => void;
+  drawTile: () => Promise<{ ok: boolean; error?: string }>;
+  discardTile: (tileId: number) => Promise<{ ok: boolean; error?: string }>;
   reset: () => void;
 }
 
@@ -233,6 +235,29 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         }
       }
     }
+  },
+
+  drawTile: async () => {
+    const { socket } = get();
+    if (!socket) return { ok: false, error: "No socket" };
+    return new Promise((resolve) => {
+      socket.emit("game:drawTile", (res) => {
+        if (!res.ok) set({ error: res.error });
+        resolve(res);
+      });
+    });
+  },
+
+  discardTile: async (tileId: number) => {
+    const { socket } = get();
+    if (!socket) return { ok: false, error: "No socket" };
+    return new Promise((resolve) => {
+      socket.emit("game:discardTile", { tileId }, (res) => {
+        if (!res.ok) set({ error: res.error });
+        else set({ selectedTileId: null }); // clear selection after discard
+        resolve(res);
+      });
+    });
   },
 
   reset: () => {
