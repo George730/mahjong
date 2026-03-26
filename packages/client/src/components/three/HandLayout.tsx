@@ -15,13 +15,8 @@ import * as THREE from "three";
 import type { Tile, PublicPlayerState } from "@mahjong/common";
 import { seatsFromPerspective } from "@mahjong/common";
 import { useGameStore, type OpponentHandState } from "../../stores/game-store.ts";
-import TileMesh, { TILE_WIDTH } from "./TileMesh.tsx";
-
-// Layout constants (matching SceneDemoPage)
-const GAP = TILE_WIDTH + 0.02;
-const TABLE_EDGE = 4.25;
-const CORNER_MARGIN = 1.5;
-const ROW_LEFT = -(5 - CORNER_MARGIN); // leftmost position along a table edge
+import TileMesh from "./TileMesh.tsx";
+import { GAP, TABLE_EDGE, ROW_LEFT } from "./layout-constants.ts";
 
 // Per-side config: how to compute tile position and rotation
 interface SideConfig {

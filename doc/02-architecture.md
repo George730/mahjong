@@ -75,6 +75,7 @@ mahjong/
 │       │   │   │   ├── TileMesh.tsx      # 3D tile (BoxGeometry + materials)
 │       │   │   │   ├── TableMesh.tsx     # Table surface + border meshes
 │       │   │   │   ├── HandLayout.tsx    # Hand tile positioning
+│       │   │   │   ├── TableOverlays.tsx # Player labels, bonus tiles, turn indicator
 │       │   │   │   ├── SceneLighting.tsx # Lights + shadows
 │       │   │   │   └── animations.ts     # Tween/clock animation helpers
 │       │   │   ├── overlays/     # HTML overlays on 3D canvas
@@ -281,67 +282,34 @@ WALL_EXHAUSTED
 - Server persists live game state in Redis key `room:{code}:game`.
 - Socket event: host emits `game:start` → server deals and emits `game:state` to each player (each player sees only their own hand + public info).
 
-#### 2C — Three.js Table & Live Hand
+#### 2C — 3D Table & Live Hand ✅
 
-First-person mahjong table view rendered in Three.js via React-Three-Fiber, with real-time hand broadcasting. Divided into 6 sub-phases:
+First-person mahjong table view rendered in Three.js via React-Three-Fiber, with real-time hand broadcasting.
 
-#### 2C-1 — Scene Foundation ✅
-- `GameCanvas.tsx` — R3F `<Canvas>` with ACES filmic tone mapping, antialiasing, shadow support.
-- `PerspectiveCamera` at `(0, 8, 9)`, fov 45, ~41° angle looking down at the table.
-- `SceneLighting.tsx` — `DirectionalLight` from `(0, 10, 0)` with 2048px shadow maps, `AmbientLight` (warm fill), `PointLight` at center (warm glow), `HemisphereLight` (sky/ground); optional debug helper.
-- `TableMesh.tsx` — `PlaneGeometry` (10×10) with PBR felt material (`#1a5c38`, roughness 0.85, receiveShadow), 4 wood border boxes + 4 corner blocks (`#8b6914`, roughness 0.6).
-- `SceneDemoPage.tsx` at route `/scene` for dev preview.
+- **Scene**: `GameCanvas.tsx` (R3F Canvas, ACES tone mapping, shadows), `PerspectiveCamera` at (0,8,9) fov 45, `SceneLighting.tsx` (directional+ambient+point+hemisphere lights, 2048px shadow maps), `TableMesh.tsx` (10×10 felt plane + wood border/corners).
+- **Tiles**: `TileMesh.tsx` (BoxGeometry 0.42×0.58×0.16, 6-face materials), `tileTextures.ts` (canvas-rendered 256px textures, cached). Standing/flat orientations, hover/select lift + emissive glow, raycaster interaction, castShadow/receiveShadow.
+- **Hand layout**: `HandLayout.tsx` with `SIDE_CONFIGS` (bottom/top/left/right). `ViewerHand` (flat, click-to-select, drag-to-reorder with threshold gesture + gap animation). `OpponentHand` (standing, stable tileOrder keys for smooth lerp).
+- **Broadcast**: Socket events (`game:tileSelected`, `game:tileDeselected`, `game:handReordered`, `game:tileDragging`) — server relays to room, no mutation. Only positional indices transmitted, never tile IDs or faces.
+- **Overlays**: `TableOverlays.tsx` — player name labels (canvas texture on vertical PlaneGeometry, standing on wood border), center indicator (canvas texture on CircleGeometry with oriented wind characters, wall count, dealer badge), bonus tiles (scaled flat TileMesh with group-wrapper orientation per side).
+- **Pages**: `RoomPage.tsx` mounts GameCanvas with HandLayout + TableOverlays when game active. `SceneDemoPage.tsx` at `/scene` with static and store-driven demo modes.
 
-#### 2C-2 — Tile Mesh System ✅
-- `TileMesh.tsx` — `BoxGeometry(0.42, 0.58, 0.16)` with 6-face `MeshStandardMaterial` array. Face texture on +Z, back on -Z, ivory sides, matte bottom.
-- `tileTextures.ts` — Canvas-rendered 256px textures for all 42 tile faces (cached by key), back texture (deep blue with border/diamond ornament), side texture (ivory with depth gradient). Correct colors: red wan, green tiao, blue tong, black winds, colored dragons/seasons/flowers.
-- Two orientation modes:
-  - **Standing** (`flat=false`): upright on table, `rotationY` controls face direction. Bottom=0, top=π, left=-π/2, right=π/2.
-  - **Flat** (`flat=true`): lies on table, face texture pointing up (+Y). Used for main player's hand.
-- Tile states: hover (Y lift 0.08 + white emissive), selected (Y lift 0.2 + gold emissive), smooth animation via `useFrame`.
-- Raycaster: `onClick`, `onPointerOver`/`Out` with cursor change. `interactive` prop to disable for opponent tiles.
-- Layout: 18 tiles max per side, left-aligned per player's perspective, corner margin for clearance.
-- `castShadow` + `receiveShadow` enabled.
+**Data model (`packages/common/src/types/events.ts`):**
+- `TileSelectedPayload`: `{ seatIndex, tilePosition }`.
+- `TileDeselectedPayload`: `{ seatIndex }`.
+- `HandReorderedPayload`: `{ seatIndex, fromPosition, toPosition }`.
+- `TileDraggingPayload`: `{ seatIndex, fromPosition, hoverPosition: number | null }`.
 
-#### 2C-3 — Hand Layout & Interaction
-- Extract tile positioning logic from `SceneDemoPage` into reusable `HandLayout.tsx` component.
-- Compute positions for 4 sides from game state: player hand (flat, face-up), 3 opponents (standing, facing outward).
-- Wire to Zustand `game-store`: read `handOrder`, `selectedTileId`, `opponentHands`.
-- Tile selection via store's `selectTile()` action.
-- Drag-to-reorder in 3D (R3F pointer events or HTML drag overlay).
-- Handle variable hand sizes (13 initial, 14 after draw, up to 18 with kongs).
-
-#### 2C-4 — Table Layout & HTML Overlays
-- Player name, seat wind (东/南/西/北), and dealer badge (庄) rendered as HTML overlays positioned over each seat via R3F `<Html>`.
-- Turn indicator and active player highlight.
-- Bonus tile display: small flat 3D tiles near each player's seat.
-- Discard pool placeholder in center area.
-
-#### 2C-5 — Game Board Integration
-- Replace the CSS 3D `GameBoard.tsx` with a new component that mounts `GameCanvas` + Three.js scene.
-- Wire `RoomPage.tsx` to render 3D game board when `gameView` is active.
-- Pass `gameView`, `userId`, `roomPlayers` props through to the 3D scene.
-- Preserve header bar (room code, round wind, wall count, leave button) as HTML above canvas.
-
-#### 2C-6 — Broadcast & Sync
-- Socket events to relay cosmetic hand actions (no tile identities revealed):
-  - `game:tileSelected` (C→S→C): broadcasts the index (position) of the selected tile to other players; they see a face-down tile rise in 3D.
-  - `game:tileDeselected` (C→S→C): clears the selection.
-  - `game:handReordered` (C→S→C): broadcasts that tiles at position X and Y were swapped; other players see face-down tiles animate into new positions.
-- Server relays these events to other players in the room without modification. No game-state mutation — purely visual.
-- Security: only positional indices are transmitted, never tile IDs or faces.
-
-**Data model additions (`packages/common/src/types/events.ts`):**
-- `game:tileSelected` payload: `{ seatIndex, tilePosition }`.
-- `game:tileDeselected` payload: `{ seatIndex }`.
-- `game:handReordered` payload: `{ seatIndex, fromPosition, toPosition }`.
+**Store (`OpponentHandState`):**
+- `selectedPosition: number | null` — which tile position is raised.
+- `dragging: { fromPosition, hoverPosition } | null` — live drag state.
+- `tileOrder: number[]` — stable tile identities for smooth reorder animation.
 
 #### 2D — Draw & Discard Loop
 - Turn cycle: active player draws from wall → must discard one tile → turn passes to next player (E→S→W→N).
 - Socket events: `game:draw` (S→C, tile drawn), `game:discard` (C→S, tile discarded), `game:state` (S→C, updated state after each action).
 - Server validates all actions (can't discard a tile not in hand, can't act out of turn).
-- Client: `DiscardPool` component (tiles discarded by each player, placed in center of table layout from 2C), `WallCounter` (remaining tiles). Click-to-discard on selected tile.
-- Zustand `game-store.ts` for client game state (extends store from 2B/2C).
+- Client: `DiscardPool` component (tiles discarded by each player, placed in center of table layout), `WallCounter` (remaining tiles). Click-to-discard on selected tile.
+- Zustand `game-store.ts` for client game state (extends existing store).
 
 #### 2E — Claims
 - After a discard, other players may claim: chow (吃, next-in-turn only, sequential pair in hand), pung (碰, any player, pair in hand), kong (杠, any player, triplet in hand).

@@ -65,13 +65,8 @@ export interface DealResult {
   gameState: GameState;
 }
 
-// --- Seat-wind mapping ---
-
-const SEAT_WINDS: Wind[] = ["east", "south", "west", "north"];
-
-export function seatWind(seatIndex: number): Wind {
-  return SEAT_WINDS[seatIndex];
-}
+// Re-export for backwards compatibility — canonical definition is in seat-utils.ts
+export { windForSeat as seatWind } from "./seat-utils.js";
 
 // --- Deal logic ---
 

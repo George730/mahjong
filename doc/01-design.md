@@ -83,12 +83,7 @@ Seasons and Flowers are bonus tiles — drawn and immediately set aside, replace
 | **2** | **Core Game** | **Full 普通版 game engine (sub-steps below)** | **Playable four-player game** |
 | 2A | Tile System | Tile types/enums, 144-tile set generation, shuffle | Tiles can be created and randomized |
 | 2B | Game State & Deal | Game state machine, wall, dealing 13/14 tiles, flower/season replacement | Game can start and deal hands |
-| 2C-1 | Scene Foundation | Three.js/R3F@8/drei@9, `GameCanvas`, `SceneLighting` (4 lights, shadow maps, tone mapping), `TableMesh` (felt + wood border + corners), `/scene` demo | Done |
-| 2C-2 | Tile Mesh System | `TileMesh` (BoxGeometry + 6-face materials), `tileTextures` (canvas-rendered, cached), standing/flat orientations, hover/select animations, raycaster | Done |
-| 2C-3 | Hand Layout & Interaction | Extract `HandLayout.tsx`, wire to Zustand game-store, tile selection, drag-to-reorder in 3D | Interactive hand management in 3D |
-| 2C-4 | Table Layout & HTML Overlays | Player labels via `<Html>`, bonus tiles, discard pool placeholder, turn indicator | Complete table UI with all info visible |
-| 2C-5 | Game Board Integration | Replace CSS 3D `GameBoard.tsx` with Three.js scene, wire `RoomPage` to mount 3D board | 3D game board in real game flow |
-| 2C-6 | Broadcast & Sync | Wire socket broadcasts to 3D tile state, opponent highlight effects | Players see opponents arranging tiles in 3D |
+| 2C | 3D Table & Live Hand | Three.js/R3F scene (`GameCanvas`, `SceneLighting`, `TableMesh`), tile mesh system (`TileMesh`, `tileTextures`), 4-side hand layout with click-to-select & drag-to-reorder, broadcast sync, table overlays (player labels, center indicator, bonus tiles) | Done |
 | 2D | Draw & Discard Loop | Basic turn cycle (draw → discard → next player), discard pool, wall counter | Players can take turns drawing and discarding |
 | 2E | Claims | Chow (吃), pung (碰), kong (杠) logic, claim priority resolution, action prompt UI | Players can claim discards to form melds |
 | 2F | Win Detection | Valid hand checking (4 melds + pair, seven pairs, thirteen orphans), self-drawn & discard win, minimum 8-fan gate | Players can declare and win |

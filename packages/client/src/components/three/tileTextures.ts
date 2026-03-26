@@ -5,23 +5,15 @@ import * as THREE from "three";
 import type { TileFace } from "@mahjong/common";
 import { tileFaceToString } from "@mahjong/common";
 
-// --- Character and color maps ---
+import {
+  SUIT_CHARS, SUIT_HEX as SUIT_COLORS, RANK_CHARS, WIND_CHARS,
+  DRAGON_MAP as DRAGON_MAP_FULL, SEASON_CHARS, FLOWER_CHARS,
+} from "../../constants/tile-chars.ts";
 
-const SUIT_CHARS: Record<string, string> = { wan: "万", tiao: "条", tong: "筒" };
-const SUIT_COLORS: Record<string, string> = {
-  wan: "#dc2626",   // red
-  tiao: "#15803d",  // green
-  tong: "#2563eb",  // blue
-};
-const RANK_CHARS = ["一", "二", "三", "四", "五", "六", "七", "八", "九"];
-const WIND_CHARS: Record<string, string> = { east: "東", south: "南", west: "西", north: "北" };
-const DRAGON_MAP: Record<string, { char: string; color: string }> = {
-  zhong: { char: "中", color: "#dc2626" },
-  fa:    { char: "發", color: "#15803d" },
-  bai:   { char: "白", color: "#2563eb" },
-};
-const SEASON_CHARS: Record<string, string> = { spring: "春", summer: "夏", autumn: "秋", winter: "冬" };
-const FLOWER_CHARS: Record<string, string> = { plum: "梅", orchid: "蘭", bamboo: "竹", chrysanthemum: "菊" };
+// Adapt DRAGON_MAP to the { char, color } shape used below
+const DRAGON_MAP: Record<string, { char: string; color: string }> = Object.fromEntries(
+  Object.entries(DRAGON_MAP_FULL).map(([k, v]) => [k, { char: v.char, color: v.hex }]),
+);
 
 // --- Texture cache ---
 

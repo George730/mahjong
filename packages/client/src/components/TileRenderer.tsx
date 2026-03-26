@@ -20,21 +20,15 @@ const DIMS = {
   lg: { w: 44, h: 60, depth: 6, text: "text-base", sub: "text-xs" },
 } as const;
 
-const SUIT_CHARS: Record<string, string> = { wan: "万", tiao: "条", tong: "筒" };
-const SUIT_COLORS: Record<string, string> = {
-  wan: "text-red-600",
-  tiao: "text-green-700",
-  tong: "text-blue-600",
-};
-const RANK_CHARS = ["一", "二", "三", "四", "五", "六", "七", "八", "九"];
-const WIND_CHARS: Record<string, string> = { east: "東", south: "南", west: "西", north: "北" };
-const DRAGON_CHARS: Record<string, { char: string; color: string }> = {
-  zhong: { char: "中", color: "text-red-600" },
-  fa: { char: "發", color: "text-green-700" },
-  bai: { char: "白", color: "text-blue-600" },
-};
-const SEASON_CHARS: Record<string, string> = { spring: "春", summer: "夏", autumn: "秋", winter: "冬" };
-const FLOWER_CHARS: Record<string, string> = { plum: "梅", orchid: "蘭", bamboo: "竹", chrysanthemum: "菊" };
+import {
+  SUIT_CHARS, SUIT_TW as SUIT_COLORS, RANK_CHARS, WIND_CHARS,
+  DRAGON_MAP, SEASON_CHARS, FLOWER_CHARS,
+} from "../constants/tile-chars.ts";
+
+// Adapt DRAGON_MAP to the { char, color } shape with Tailwind classes used below
+const DRAGON_CHARS: Record<string, { char: string; color: string }> = Object.fromEntries(
+  Object.entries(DRAGON_MAP).map(([k, v]) => [k, { char: v.char, color: v.tw }]),
+);
 
 function renderFace(face: TileFace, textSize: string, subSize: string) {
   switch (face.category) {

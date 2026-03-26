@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { MAX_PLAYERS, windForSeat } from "@mahjong/common";
+import { MAX_PLAYERS, windForSeat, WIND_CN } from "@mahjong/common";
 import { useAuthStore } from "../stores/auth-store.ts";
 import { useRoomStore } from "../stores/room-store.ts";
 import { useGameStore } from "../stores/game-store.ts";
@@ -10,6 +10,7 @@ import PlayerSlot from "../components/PlayerSlot.tsx";
 import CopyLinkButton from "../components/CopyLinkButton.tsx";
 import GameCanvas from "../components/three/GameCanvas.tsx";
 import HandLayout from "../components/three/HandLayout.tsx";
+import TableOverlays from "../components/three/TableOverlays.tsx";
 
 export default function RoomPage() {
   const { roomCode } = useParams<{ roomCode: string }>();
@@ -70,8 +71,6 @@ export default function RoomPage() {
     );
   }
 
-  const WIND_CN: Record<string, string> = { east: "东", south: "南", west: "西", north: "北" };
-
   // Show 3D game board when game is in progress
   if (gameView) {
     const mySeat = gameView.players.find((p) => p.userId === user?.id);
@@ -86,8 +85,6 @@ export default function RoomPage() {
             Room <span className="text-emerald-400 tracking-widest font-mono">{room.code}</span>
             <span className="mx-2">·</span>
             Round: {WIND_CN[gameView.roundWind]}
-            <span className="mx-2">·</span>
-            Wall: {gameView.wallCount}
             <span className="mx-2">·</span>
             {isMyTurn ? (
               <span className="text-yellow-400 font-medium">Your turn</span>
@@ -106,6 +103,7 @@ export default function RoomPage() {
         {/* 3D game canvas */}
         <GameCanvas>
           <HandLayout />
+          <TableOverlays />
         </GameCanvas>
       </div>
     );

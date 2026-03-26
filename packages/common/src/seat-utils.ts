@@ -7,6 +7,9 @@ export type TablePosition = "bottom" | "right" | "top" | "left";
 
 const SEAT_WINDS: Wind[] = ["east", "south", "west", "north"];
 
+/** Simplified Chinese wind names for UI display. */
+export const WIND_CN: Record<string, string> = { east: "东", south: "南", west: "西", north: "北" };
+
 /**
  * Given the viewer's seat index and another player's seat index,
  * returns where that player sits relative to the viewer.

@@ -2,11 +2,10 @@
 
 import { useRef, useState } from "react";
 import type { PlayerGameView, Tile, PublicPlayerState, RoomPlayer } from "@mahjong/common";
-import { seatsFromPerspective, windForSeat } from "@mahjong/common";
+import { seatsFromPerspective, windForSeat, WIND_CN } from "@mahjong/common";
 import { useGameStore, type OpponentHandState } from "../stores/game-store.ts";
 import TileRenderer from "./TileRenderer.tsx";
 
-const WIND_CN: Record<string, string> = { east: "东", south: "南", west: "西", north: "北" };
 
 interface GameBoardProps {
   gameView: PlayerGameView;

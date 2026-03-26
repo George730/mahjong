@@ -13,9 +13,12 @@ import * as THREE from "three";
 import { createFullSet, shuffle, type TileFace, type Tile, type PlayerGameView } from "@mahjong/common";
 import SceneLighting from "../components/three/SceneLighting.tsx";
 import TableMesh from "../components/three/TableMesh.tsx";
-import TileMesh, { TILE_WIDTH } from "../components/three/TileMesh.tsx";
+import TileMesh from "../components/three/TileMesh.tsx";
+import { GAP, TABLE_EDGE, ROW_LEFT } from "../components/three/layout-constants.ts";
 import HandLayout from "../components/three/HandLayout.tsx";
+import TableOverlays from "../components/three/TableOverlays.tsx";
 import { useGameStore } from "../stores/game-store.ts";
+import { useRoomStore } from "../stores/room-store.ts";
 
 // --- Static demo helpers ---
 
@@ -34,13 +37,8 @@ function uniqueFaces(): TileFace[] {
 
 const allFaces = uniqueFaces();
 
-// Layout constants
-const GAP = TILE_WIDTH + 0.02;
 const HAND_COUNT = 14;       // dealer hand
 const OPP_COUNT = 13;        // non-dealer opponents
-const TABLE_EDGE = 4.25;      // distance from center to each player's row (along their facing axis)
-const CORNER_MARGIN = 1.5;   // clearance from table corner to avoid tile collisions
-const ROW_LEFT = -(5 - CORNER_MARGIN); // leftmost position along a table edge (table half = 5)
 
 // --- Static demo scene (original) ---
 
@@ -109,34 +107,40 @@ function StaticDemoScene({ selectedIndex, onSelect }: { selectedIndex: number | 
 
 // --- Store-driven demo (HandLayout) ---
 
-/** Seed the game store with a mock deal so HandLayout can render. */
+/** Seed the game store and room store with mock data so HandLayout + TableOverlays render. */
 function useMockGameState() {
-  const store = useGameStore;
+  const gameStore = useGameStore;
+  const roomStore = useRoomStore;
 
   useEffect(() => {
     const tiles = shuffle(createFullSet());
 
-    // Deal: seat 0 (dealer) gets 14
+    // Deal: seat 0 (dealer) gets 14, pick out some bonus tiles for demo
     const hand: Tile[] = tiles.slice(0, 14);
+    const bonusPool = tiles.filter((t) => t.face.category === "season" || t.face.category === "flower");
+    const myBonus = bonusPool.slice(0, 2);
+    const opp1Bonus = bonusPool.slice(2, 4);
+    const opp2Bonus = bonusPool.slice(4, 5);
+    const opp3Bonus = bonusPool.slice(5, 7);
 
     const mockView: PlayerGameView = {
       phase: "playing",
       hand,
-      bonusTiles: [],
+      bonusTiles: myBonus,
       players: [
-        { userId: "me", seatIndex: 0, handCount: 14, bonusTiles: [], discards: [], melds: [] },
-        { userId: "opp1", seatIndex: 1, handCount: 13, bonusTiles: [], discards: [], melds: [] },
-        { userId: "opp2", seatIndex: 2, handCount: 13, bonusTiles: [], discards: [], melds: [] },
-        { userId: "opp3", seatIndex: 3, handCount: 13, bonusTiles: [], discards: [], melds: [] },
+        { userId: "me", seatIndex: 0, handCount: 14, bonusTiles: myBonus, discards: [], melds: [] },
+        { userId: "opp1", seatIndex: 1, handCount: 13, bonusTiles: opp1Bonus, discards: [], melds: [] },
+        { userId: "opp2", seatIndex: 2, handCount: 13, bonusTiles: opp2Bonus, discards: [], melds: [] },
+        { userId: "opp3", seatIndex: 3, handCount: 13, bonusTiles: opp3Bonus, discards: [], melds: [] },
       ],
-      wallCount: 91,
+      wallCount: 88,
       currentTurn: 0,
       dealer: 0,
       roundWind: "east",
       turnCount: 0,
     };
 
-    store.setState({
+    gameStore.setState({
       gameView: mockView,
       handOrder: hand.map((t) => t.id),
       mySeatIndex: 0,
@@ -144,15 +148,37 @@ function useMockGameState() {
       opponentHands: {},
     });
 
+    // Mock room data so TableOverlays can resolve usernames
+    roomStore.setState({
+      room: {
+        code: "DEMO",
+        hostId: "me",
+        status: "playing",
+        createdAt: new Date().toISOString(),
+        players: [
+          { userId: "me", username: "You", isGuest: false, seatIndex: 0 },
+          { userId: "opp1", username: "Alice", isGuest: false, seatIndex: 1 },
+          { userId: "opp2", username: "Bob", isGuest: false, seatIndex: 2 },
+          { userId: "opp3", username: "Charlie", isGuest: false, seatIndex: 3 },
+        ],
+      },
+    });
+
     return () => {
-      store.getState().reset();
+      gameStore.getState().reset();
+      roomStore.setState({ room: null });
     };
   }, []);
 }
 
 function StoreDemoScene() {
   useMockGameState();
-  return <HandLayout />;
+  return (
+    <>
+      <HandLayout />
+      <TableOverlays />
+    </>
+  );
 }
 
 // --- Page ---
