@@ -34,6 +34,7 @@ const SELECT_LIFT = 0.2;
 const DRAG_LIFT = 0.15;
 const EMISSIVE_HOVER = 0.15;
 const EMISSIVE_SELECT = 0.35;
+const EMISSIVE_HIGHLIGHT = 0.4;
 const LERP_SPEED = 12;
 
 interface TileMeshProps {
@@ -46,6 +47,8 @@ interface TileMeshProps {
   selected?: boolean;
   /** Tile is being dragged — lifts higher and uses gold glow. */
   dragging?: boolean;
+  /** Cyan glow to indicate tile is eligible for a meld claim. */
+  highlighted?: boolean;
   onClick?: () => void;
   onPointerDown?: () => void;
   /** Disable hover/select interactivity (e.g. for opponent tiles). */
@@ -59,6 +62,7 @@ export default function TileMesh({
   flat = false,
   selected = false,
   dragging = false,
+  highlighted = false,
   onClick,
   onPointerDown,
   interactive = true,
@@ -140,20 +144,28 @@ export default function TileMesh({
     mesh.position.z += (targetZ - mesh.position.z) * speed;
 
     // Emissive glow on front face (material index 4 = +z = character face)
-    const targetEmissive = dragging
-      ? EMISSIVE_SELECT
-      : selected
+    const targetEmissive = highlighted
+      ? EMISSIVE_HIGHLIGHT
+      : dragging
         ? EMISSIVE_SELECT
-        : hovered && interactive
-          ? EMISSIVE_HOVER
-          : 0;
+        : selected
+          ? EMISSIVE_SELECT
+          : hovered && interactive
+            ? EMISSIVE_HOVER
+            : 0;
+
+    const emissiveColor = highlighted
+      ? "#00e5ff"
+      : dragging || selected
+        ? "#c9a84c"
+        : "#ffffff";
 
     const frontMat = (mesh.material as THREE.MeshStandardMaterial[])[4];
     if (frontMat) {
       const current = frontMat.emissiveIntensity;
       frontMat.emissiveIntensity += (targetEmissive - current) * Math.min(1, delta * 10);
       if (targetEmissive > 0) {
-        frontMat.emissive.set(dragging || selected ? "#c9a84c" : "#ffffff");
+        frontMat.emissive.set(emissiveColor);
       }
     }
   });

@@ -1,4 +1,4 @@
-// Socket event handlers for game:start and cosmetic hand broadcasts (select/reorder)
+// Socket event handlers for game actions and cosmetic hand broadcasts
 
 import type { Server, Socket } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@mahjong/common";
@@ -8,6 +8,21 @@ import * as gameManager from "../game/game-manager.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
+
+/** Helper: broadcast updated game views to all players in a room. */
+function broadcastViews(
+  io: TypedServer,
+  roomCode: string,
+  gameState: Parameters<typeof gameManager.createPlayerViews>[0],
+) {
+  const views = gameManager.createPlayerViews(gameState);
+  for (const [, s] of io.sockets.sockets) {
+    if (s.rooms.has(roomCode)) {
+      const view = views.get(s.user?.userId);
+      if (view) s.emit("game:state", view);
+    }
+  }
+}
 
 export function registerGameHandlers(
   io: TypedServer,
@@ -51,16 +66,7 @@ export function registerGameHandlers(
       await gameManager.saveGameState(entry.roomCode, gameState);
 
       io.to(entry.roomCode).emit("room:updated", updatedRoom);
-
-      const views = gameManager.createPlayerViews(gameState);
-      for (const [, s] of io.sockets.sockets) {
-        if (s.rooms.has(entry.roomCode)) {
-          const view = views.get(s.user?.userId);
-          if (view) {
-            s.emit("game:state", view);
-          }
-        }
-      }
+      broadcastViews(io, entry.roomCode, gameState);
 
       callback({ ok: true });
     } catch (err) {
@@ -88,15 +94,7 @@ export function registerGameHandlers(
 
       gameManager.handleDrawTile(gameState);
       await gameManager.saveGameState(entry.roomCode, gameState);
-
-      // Broadcast updated views to all players
-      const views = gameManager.createPlayerViews(gameState);
-      for (const [, s] of io.sockets.sockets) {
-        if (s.rooms.has(entry.roomCode)) {
-          const view = views.get(s.user?.userId);
-          if (view) s.emit("game:state", view);
-        }
-      }
+      broadcastViews(io, entry.roomCode, gameState);
 
       callback({ ok: true });
     } catch (err) {
@@ -124,15 +122,120 @@ export function registerGameHandlers(
 
       gameManager.handleDiscardTile(gameState, payload.tileId);
       await gameManager.saveGameState(entry.roomCode, gameState);
+      broadcastViews(io, entry.roomCode, gameState);
 
-      // Broadcast updated views to all players
-      const views = gameManager.createPlayerViews(gameState);
-      for (const [, s] of io.sockets.sockets) {
-        if (s.rooms.has(entry.roomCode)) {
-          const view = views.get(s.user?.userId);
-          if (view) s.emit("game:state", view);
-        }
+      callback({ ok: true });
+    } catch (err) {
+      callback({ ok: false, error: (err as Error).message });
+    }
+  });
+
+  // --- Claim chow ---
+  socket.on("game:claimChow", async (payload, callback) => {
+    try {
+      const entry = getSocketRoom(socket.id);
+      if (!entry) return callback({ ok: false, error: "You are not in a room" });
+
+      const gameState = await gameManager.getGameState(entry.roomCode);
+      if (!gameState) return callback({ ok: false, error: "No active game" });
+
+      const player = gameState.players.find((p) => p.userId === socket.user.userId);
+      if (!player) return callback({ ok: false, error: "You are not in this game" });
+
+      gameManager.handleClaimChow(gameState, player.seatIndex, payload.handTileIds);
+      await gameManager.saveGameState(entry.roomCode, gameState);
+      broadcastViews(io, entry.roomCode, gameState);
+
+      callback({ ok: true });
+    } catch (err) {
+      callback({ ok: false, error: (err as Error).message });
+    }
+  });
+
+  // --- Claim pung ---
+  socket.on("game:claimPung", async (callback) => {
+    try {
+      const entry = getSocketRoom(socket.id);
+      if (!entry) return callback({ ok: false, error: "You are not in a room" });
+
+      const gameState = await gameManager.getGameState(entry.roomCode);
+      if (!gameState) return callback({ ok: false, error: "No active game" });
+
+      const player = gameState.players.find((p) => p.userId === socket.user.userId);
+      if (!player) return callback({ ok: false, error: "You are not in this game" });
+
+      gameManager.handleClaimPung(gameState, player.seatIndex);
+      await gameManager.saveGameState(entry.roomCode, gameState);
+      broadcastViews(io, entry.roomCode, gameState);
+
+      callback({ ok: true });
+    } catch (err) {
+      callback({ ok: false, error: (err as Error).message });
+    }
+  });
+
+  // --- Claim open kong ---
+  socket.on("game:claimOpenKong", async (callback) => {
+    try {
+      const entry = getSocketRoom(socket.id);
+      if (!entry) return callback({ ok: false, error: "You are not in a room" });
+
+      const gameState = await gameManager.getGameState(entry.roomCode);
+      if (!gameState) return callback({ ok: false, error: "No active game" });
+
+      const player = gameState.players.find((p) => p.userId === socket.user.userId);
+      if (!player) return callback({ ok: false, error: "You are not in this game" });
+
+      gameManager.handleClaimOpenKong(gameState, player.seatIndex);
+      await gameManager.saveGameState(entry.roomCode, gameState);
+      broadcastViews(io, entry.roomCode, gameState);
+
+      callback({ ok: true });
+    } catch (err) {
+      callback({ ok: false, error: (err as Error).message });
+    }
+  });
+
+  // --- Declare closed kong ---
+  socket.on("game:claimClosedKong", async (payload, callback) => {
+    try {
+      const entry = getSocketRoom(socket.id);
+      if (!entry) return callback({ ok: false, error: "You are not in a room" });
+
+      const gameState = await gameManager.getGameState(entry.roomCode);
+      if (!gameState) return callback({ ok: false, error: "No active game" });
+
+      const player = gameState.players.find((p) => p.userId === socket.user.userId);
+      if (!player) return callback({ ok: false, error: "You are not in this game" });
+      if (gameState.currentTurn !== player.seatIndex) {
+        return callback({ ok: false, error: "Not your turn" });
       }
+
+      gameManager.handleDeclareClosedKong(gameState, player.seatIndex, payload.tileIds);
+      await gameManager.saveGameState(entry.roomCode, gameState);
+      broadcastViews(io, entry.roomCode, gameState);
+
+      callback({ ok: true });
+    } catch (err) {
+      callback({ ok: false, error: (err as Error).message });
+    }
+  });
+
+  // --- Pass on claim ---
+  socket.on("game:claimPass", async (callback) => {
+    try {
+      const entry = getSocketRoom(socket.id);
+      if (!entry) return callback({ ok: false, error: "You are not in a room" });
+
+      const gameState = await gameManager.getGameState(entry.roomCode);
+      if (!gameState) return callback({ ok: false, error: "No active game" });
+
+      const player = gameState.players.find((p) => p.userId === socket.user.userId);
+      if (!player) return callback({ ok: false, error: "You are not in this game" });
+
+      gameManager.handleClaimPass(gameState, player.seatIndex);
+      await gameManager.saveGameState(entry.roomCode, gameState);
+      broadcastViews(io, entry.roomCode, gameState);
 
       callback({ ok: true });
     } catch (err) {

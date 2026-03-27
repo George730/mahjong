@@ -32,6 +32,16 @@ export interface DiscardTilePayload {
   tileId: number; // ID of the tile to discard
 }
 
+// --- Claim payloads ---
+
+export interface ClaimChowPayload {
+  handTileIds: [number, number]; // IDs of the two hand tiles to use
+}
+
+export interface ClaimClosedKongPayload {
+  tileIds: number[]; // IDs of all 4 tiles forming the closed kong
+}
+
 // --- Socket.IO event maps ---
 
 export interface ServerToClientEvents {
@@ -63,6 +73,23 @@ export interface ClientToServerEvents {
   ) => void;
   "game:discardTile": (
     payload: DiscardTilePayload,
+    callback: (response: { ok: true } | { ok: false; error: string }) => void,
+  ) => void;
+  "game:claimChow": (
+    payload: ClaimChowPayload,
+    callback: (response: { ok: true } | { ok: false; error: string }) => void,
+  ) => void;
+  "game:claimPung": (
+    callback: (response: { ok: true } | { ok: false; error: string }) => void,
+  ) => void;
+  "game:claimOpenKong": (
+    callback: (response: { ok: true } | { ok: false; error: string }) => void,
+  ) => void;
+  "game:claimClosedKong": (
+    payload: ClaimClosedKongPayload,
+    callback: (response: { ok: true } | { ok: false; error: string }) => void,
+  ) => void;
+  "game:claimPass": (
     callback: (response: { ok: true } | { ok: false; error: string }) => void,
   ) => void;
   "game:tileSelected": (payload: TileSelectedPayload) => void;

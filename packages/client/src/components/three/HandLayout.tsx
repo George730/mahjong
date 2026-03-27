@@ -91,6 +91,7 @@ function ViewerHand({
   tiles,
   drawnTile,
   selectedTileId,
+  highlightedTileIds,
   onSelect,
   onReorder,
   onDragHover,
@@ -98,6 +99,7 @@ function ViewerHand({
   tiles: Tile[];
   drawnTile: Tile | null;
   selectedTileId: number | null;
+  highlightedTileIds: number[];
   onSelect: (tileId: number | null) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
   onDragHover: (fromIndex: number, hoverIndex: number | null) => void;
@@ -226,6 +228,7 @@ function ViewerHand({
             rotationY={config.rotationY}
             selected={selectedTileId === tile.id}
             dragging={isDragging}
+            highlighted={highlightedTileIds.includes(tile.id)}
             interactive
             onPointerDown={() => handlePointerDown(i)}
           />
@@ -240,6 +243,7 @@ function ViewerHand({
           position={[drawnTileX, 0, TABLE_EDGE]}
           rotationY={config.rotationY}
           selected={selectedTileId === drawnTile.id}
+          highlighted={highlightedTileIds.includes(drawnTile.id)}
           interactive
           onClick={() => onSelect(drawnTile.id)}
         />
@@ -337,6 +341,7 @@ export default function HandLayout() {
   const gameView = useGameStore((s) => s.gameView);
   const handOrder = useGameStore((s) => s.handOrder);
   const selectedTileId = useGameStore((s) => s.selectedTileId);
+  const highlightedTileIds = useGameStore((s) => s.highlightedTileIds);
   const selectTile = useGameStore((s) => s.selectTile);
   const reorderHand = useGameStore((s) => s.reorderHand);
   const emitDragHover = useGameStore((s) => s.emitDragHover);
@@ -368,6 +373,7 @@ export default function HandLayout() {
         tiles={orderedHand}
         drawnTile={gameView.drawnTile}
         selectedTileId={selectedTileId}
+        highlightedTileIds={highlightedTileIds}
         onSelect={selectTile}
         onReorder={reorderHand}
         onDragHover={emitDragHover}

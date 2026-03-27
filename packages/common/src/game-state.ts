@@ -1,14 +1,18 @@
 // Canonical game state type, state machine phases, and deal logic for Chinese Standard Mahjong
 
-import type { Tile, Wind } from "./tiles.js";
-import { createFullSet, shuffle, isBonusTile } from "./tiles.js";
+import type { Tile, TileFace, Wind } from "./tiles.js";
+import { createFullSet, shuffle, isBonusTile, sameFace } from "./tiles.js";
 
 // --- State machine phases ---
 
 export type GamePhase = "waiting" | "dealing" | "playing" | "roundEnd" | "gameEnd";
 
-/** Within a "playing" turn, tracks whether the active player needs to draw or discard. */
-export type TurnPhase = "draw" | "discard";
+/** Within a "playing" turn:
+ *  - "draw": active player needs to draw a tile
+ *  - "discard": active player needs to discard a tile (or declare closed kong)
+ *  - "claiming": a tile was just discarded and other players may claim it
+ */
+export type TurnPhase = "draw" | "discard" | "claiming";
 
 // --- Per-player state ---
 
@@ -26,6 +30,8 @@ export interface Meld {
   type: "chow" | "pung" | "kong";
   tiles: Tile[];
   exposed: boolean; // false for concealed kong
+  /** ID of the tile that was claimed from another player's discard (for rendering). */
+  claimedTileId?: number;
 }
 
 // --- Full game state (server-authoritative) ---
@@ -35,10 +41,14 @@ export interface GameState {
   turnPhase: TurnPhase; // whether active player needs to draw or discard
   wall: Tile[]; // remaining tiles to draw from (front = index 0)
   players: PlayerState[];
-  currentTurn: number; // seatIndex of active player
+  currentTurn: number; // seatIndex of active player (or discarder during claiming)
   dealer: number; // seatIndex of the dealer
   roundWind: Wind; // current round wind
   turnCount: number; // how many turns have been taken
+  /** The last discarded tile available for claiming, or null. */
+  lastDiscard: { tile: Tile; fromSeat: number } | null;
+  /** Seat indices that have passed on the current claiming window. */
+  claimPasses: number[];
 }
 
 // --- Player-visible state (sent to each client — hides other players' hands) ---
@@ -65,6 +75,8 @@ export interface PlayerGameView {
   dealer: number;
   roundWind: Wind;
   turnCount: number;
+  /** The last discarded tile available for claiming, or null. */
+  lastDiscard: { tile: Tile; fromSeat: number } | null;
 }
 
 // --- Deal result ---
@@ -142,6 +154,8 @@ export function deal(playerIds: string[], dealer: number = 0, roundWind: Wind = 
     dealer,
     roundWind,
     turnCount: 0,
+    lastDiscard: null,
+    claimPasses: [],
   };
 
   return { gameState };
@@ -208,7 +222,7 @@ export function drawTile(gameState: GameState): Tile | null {
 /**
  * Discards a tile from the current player's hand or drawn tile.
  * The discarded tile goes to the player's discard pile.
- * Advances the turn to the next player (in draw phase).
+ * Enters claiming phase so other players can claim the discard.
  * Mutates gameState in place.
  */
 export function discardTile(gameState: GameState, tileId: number): void {
@@ -239,10 +253,261 @@ export function discardTile(gameState: GameState, tileId: number): void {
 
   player.discards.push(discarded);
 
-  // Advance to next player
-  gameState.currentTurn = (gameState.currentTurn + 1) % 4;
-  gameState.turnPhase = "draw";
+  // Enter claiming phase — currentTurn stays on the discarder as a marker
+  gameState.lastDiscard = { tile: discarded, fromSeat: gameState.currentTurn };
+  gameState.claimPasses = [];
+  gameState.turnPhase = "claiming";
   gameState.turnCount++;
+}
+
+// --- Claiming logic ---
+
+/**
+ * Draw a replacement tile from the wall END for kong declarations.
+ * Handles chained bonus tile replacements.
+ * Sets turnPhase to "discard" after drawing.
+ */
+function drawReplacementTile(gameState: GameState, player: PlayerState): void {
+  if (gameState.wall.length === 0) {
+    gameState.phase = "roundEnd";
+    return;
+  }
+
+  let tile = gameState.wall.pop()!;
+
+  // Handle bonus tiles: move to bonus area, draw replacement from wall end
+  while (isBonusTile(tile)) {
+    player.bonusTiles.push(tile);
+    if (gameState.wall.length === 0) {
+      gameState.phase = "roundEnd";
+      return;
+    }
+    tile = gameState.wall.pop()!;
+  }
+
+  player.drawnTile = tile;
+  gameState.turnPhase = "discard";
+}
+
+/** Remove specific tiles from a player's hand by ID. Returns removed tiles. */
+function removeTilesFromHand(player: PlayerState, tileIds: number[]): Tile[] {
+  const removed: Tile[] = [];
+  for (const id of tileIds) {
+    const idx = player.hand.findIndex((t) => t.id === id);
+    if (idx < 0) throw new Error(`Tile ${id} not found in hand`);
+    removed.push(player.hand[idx]);
+    player.hand.splice(idx, 1);
+  }
+  return removed;
+}
+
+/** Finish a claim: clear lastDiscard, remove the claimed tile from discarder's discards. */
+function finishClaim(gameState: GameState): Tile {
+  const ld = gameState.lastDiscard;
+  if (!ld) throw new Error("No discard to claim");
+
+  // Remove the claimed tile from the discarder's discard pile (it was the last one added)
+  const discarder = gameState.players[ld.fromSeat];
+  const discardIdx = discarder.discards.findIndex((t) => t.id === ld.tile.id);
+  if (discardIdx >= 0) {
+    discarder.discards.splice(discardIdx, 1);
+  }
+
+  const claimedTile = ld.tile;
+  gameState.lastDiscard = null;
+  gameState.claimPasses = [];
+  return claimedTile;
+}
+
+/**
+ * Claims a chow (sequence) from the last discard.
+ * Claimer must be the next player in turn order after the discarder.
+ */
+export function claimChow(
+  gameState: GameState,
+  claimerSeat: number,
+  handTileIds: [number, number],
+): void {
+  if (gameState.phase !== "playing") throw new Error("Game is not in playing phase");
+  if (gameState.turnPhase !== "claiming") throw new Error("Not in claiming phase");
+  if (!gameState.lastDiscard) throw new Error("No discard to claim");
+
+  const ld = gameState.lastDiscard;
+  if ((ld.fromSeat + 1) % 4 !== claimerSeat) {
+    throw new Error("Chow can only be claimed by the next player in turn order");
+  }
+
+  const claimer = gameState.players[claimerSeat];
+
+  // Validate hand tiles form a valid sequence with the discard
+  const handTiles = removeTilesFromHand(claimer, handTileIds);
+  const claimedTile = finishClaim(gameState);
+
+  // Sort tiles by rank for the meld
+  const allTiles = [claimedTile, ...handTiles];
+  allTiles.sort((a, b) => {
+    if (a.face.category === "suited" && b.face.category === "suited") {
+      return a.face.rank - b.face.rank;
+    }
+    return 0;
+  });
+
+  claimer.melds.push({
+    type: "chow",
+    tiles: allTiles,
+    exposed: true,
+    claimedTileId: claimedTile.id,
+  });
+
+  gameState.currentTurn = claimerSeat;
+  gameState.turnPhase = "discard";
+}
+
+/**
+ * Claims a pung (triplet) from the last discard.
+ * Any player (except the discarder) can claim.
+ */
+export function claimPung(gameState: GameState, claimerSeat: number): void {
+  if (gameState.phase !== "playing") throw new Error("Game is not in playing phase");
+  if (gameState.turnPhase !== "claiming") throw new Error("Not in claiming phase");
+  if (!gameState.lastDiscard) throw new Error("No discard to claim");
+  if (gameState.lastDiscard.fromSeat === claimerSeat) throw new Error("Cannot claim own discard");
+
+  const claimer = gameState.players[claimerSeat];
+  const discardFace = gameState.lastDiscard.tile.face;
+
+  // Find 2 matching tiles in hand
+  const matching = claimer.hand.filter((t) => sameFace(t.face, discardFace));
+  if (matching.length < 2) throw new Error("Not enough matching tiles for pung");
+
+  const handTileIds: [number, number] = [matching[0].id, matching[1].id];
+  const handTiles = removeTilesFromHand(claimer, handTileIds);
+  const claimedTile = finishClaim(gameState);
+
+  claimer.melds.push({
+    type: "pung",
+    tiles: [claimedTile, ...handTiles],
+    exposed: true,
+    claimedTileId: claimedTile.id,
+  });
+
+  gameState.currentTurn = claimerSeat;
+  gameState.turnPhase = "discard";
+}
+
+/**
+ * Claims an open kong (quad) from the last discard.
+ * Any player (except the discarder) can claim.
+ * Auto-draws a replacement tile from the wall end.
+ */
+export function claimOpenKong(gameState: GameState, claimerSeat: number): void {
+  if (gameState.phase !== "playing") throw new Error("Game is not in playing phase");
+  if (gameState.turnPhase !== "claiming") throw new Error("Not in claiming phase");
+  if (!gameState.lastDiscard) throw new Error("No discard to claim");
+  if (gameState.lastDiscard.fromSeat === claimerSeat) throw new Error("Cannot claim own discard");
+
+  const claimer = gameState.players[claimerSeat];
+  const discardFace = gameState.lastDiscard.tile.face;
+
+  // Find 3 matching tiles in hand
+  const matching = claimer.hand.filter((t) => sameFace(t.face, discardFace));
+  if (matching.length < 3) throw new Error("Not enough matching tiles for kong");
+
+  const handTileIds: [number, number, number] = [matching[0].id, matching[1].id, matching[2].id];
+  const handTiles = removeTilesFromHand(claimer, handTileIds);
+  const claimedTile = finishClaim(gameState);
+
+  claimer.melds.push({
+    type: "kong",
+    tiles: [claimedTile, ...handTiles],
+    exposed: true,
+    claimedTileId: claimedTile.id,
+  });
+
+  gameState.currentTurn = claimerSeat;
+
+  // Auto-draw replacement from wall end
+  drawReplacementTile(gameState, claimer);
+}
+
+/**
+ * Declares a closed kong (4 identical tiles all in own hand/drawnTile).
+ * Can only be done during the discard phase by the current player.
+ * Auto-draws a replacement tile from the wall end.
+ */
+export function declareClosedKong(
+  gameState: GameState,
+  seatIndex: number,
+  tileIds: number[],
+): void {
+  if (gameState.phase !== "playing") throw new Error("Game is not in playing phase");
+  if (gameState.turnPhase !== "discard") throw new Error("Not in discard phase");
+  if (gameState.currentTurn !== seatIndex) throw new Error("Not your turn");
+  if (tileIds.length !== 4) throw new Error("Closed kong requires exactly 4 tiles");
+
+  const player = gameState.players[seatIndex];
+
+  // Collect all tiles from hand + drawnTile
+  const allTiles = player.drawnTile ? [...player.hand, player.drawnTile] : [...player.hand];
+
+  // Validate all 4 tile IDs exist and share the same face
+  const kongTiles: Tile[] = [];
+  for (const id of tileIds) {
+    const tile = allTiles.find((t) => t.id === id);
+    if (!tile) throw new Error(`Tile ${id} not found in hand or drawn tile`);
+    kongTiles.push(tile);
+  }
+
+  // All must share the same face
+  const face = kongTiles[0].face;
+  for (let i = 1; i < kongTiles.length; i++) {
+    if (!sameFace(face, kongTiles[i].face)) {
+      throw new Error("All tiles in a closed kong must have the same face");
+    }
+  }
+
+  // Remove tiles from hand and drawnTile
+  const tileIdSet = new Set(tileIds);
+  player.hand = player.hand.filter((t) => !tileIdSet.has(t.id));
+  if (player.drawnTile && tileIdSet.has(player.drawnTile.id)) {
+    player.drawnTile = null;
+  }
+
+  player.melds.push({
+    type: "kong",
+    tiles: kongTiles,
+    exposed: false,
+  });
+
+  // Auto-draw replacement from wall end
+  drawReplacementTile(gameState, player);
+}
+
+/**
+ * A player passes on claiming the current discard.
+ * When all non-discarder players have passed, advances to the next player's draw phase.
+ */
+export function passClaim(gameState: GameState, seatIndex: number): void {
+  if (gameState.phase !== "playing") throw new Error("Game is not in playing phase");
+  if (gameState.turnPhase !== "claiming") throw new Error("Not in claiming phase");
+  if (!gameState.lastDiscard) throw new Error("No active claim window");
+
+  const discarderSeat = gameState.lastDiscard.fromSeat;
+  if (seatIndex === discarderSeat) throw new Error("Discarder does not need to pass");
+
+  // Don't double-count passes
+  if (!gameState.claimPasses.includes(seatIndex)) {
+    gameState.claimPasses.push(seatIndex);
+  }
+
+  // Check if all 3 non-discarder players have passed
+  if (gameState.claimPasses.length >= 3) {
+    // Advance to next player's draw phase
+    gameState.currentTurn = (discarderSeat + 1) % 4;
+    gameState.turnPhase = "draw";
+    gameState.lastDiscard = null;
+    gameState.claimPasses = [];
+  }
 }
 
 /**
@@ -273,5 +538,6 @@ export function createPlayerView(gameState: GameState, seatIndex: number): Playe
     dealer: gameState.dealer,
     roundWind: gameState.roundWind,
     turnCount: gameState.turnCount,
+    lastDiscard: gameState.lastDiscard,
   };
 }

@@ -6,14 +6,14 @@
 // Bonus tiles are flat face-up TileMesh instances near the left end of each
 // player's hand row, oriented toward their owner, visible to all players.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import * as THREE from "three";
-import type { Tile, PublicPlayerState } from "@mahjong/common";
+import type { Tile, Meld, PublicPlayerState } from "@mahjong/common";
 import { seatsFromPerspective, windForSeat } from "@mahjong/common";
 import { useGameStore } from "../../stores/game-store.ts";
 import { useRoomStore } from "../../stores/room-store.ts";
 import { WIND_CN } from "@mahjong/common";
-import TileMesh, { TILE_WIDTH } from "./TileMesh.tsx";
+import TileMesh, { TILE_WIDTH, TILE_HEIGHT } from "./TileMesh.tsx";
 import { TABLE_EDGE, ROW_LEFT } from "./layout-constants.ts";
 
 // --- Player label positions: standing upright on the wood border ---
@@ -399,7 +399,7 @@ const DISCARD_CONFIGS: Record<string, DiscardConfig> = {
 };
 
 /** Discard area — flat face-up tiles in a grid in front of each player. */
-function DiscardArea({ tiles, side }: { tiles: Tile[]; side: string }) {
+function DiscardArea({ tiles, side, highlightTileId }: { tiles: Tile[]; side: string; highlightTileId?: number }) {
   const config = DISCARD_CONFIGS[side];
   if (!config || !tiles.length) return null;
 
@@ -423,6 +423,7 @@ function DiscardArea({ tiles, side }: { tiles: Tile[]; side: string }) {
               position={[0, 0, 0]}
               rotationY={0}
               interactive={false}
+              highlighted={tile.id === highlightTileId}
             />
           </group>
         );
@@ -431,11 +432,190 @@ function DiscardArea({ tiles, side }: { tiles: Tile[]; side: string }) {
   );
 }
 
-/** Root overlay component — renders labels, center indicator, bonus tiles, and discard areas. */
+// --- Meld area: exposed/concealed melds to the right of each player's hand row ---
+// Follows the same pattern as BonusTiles: scaled group, oriented per-side.
+
+const MELD_SCALE = 0.8;
+const MELD_TILE_GAP = 0.02 * MELD_SCALE; // world-space gap between tile edges in meld
+const MELD_INWARD = 0.05; // shift toward center from hand row
+const MELD_SPACING = 0.1; // gap between separate melds (world coords)
+
+// ROW_RIGHT = mirror of ROW_LEFT, which is the rightmost tile position
+const ROW_RIGHT = -ROW_LEFT; // +3.5
+
+interface MeldConfig {
+  /** Position at a given world-space offset along the meld row from the start. */
+  positionAtOffset: (offset: number) => [number, number, number];
+  orientY: number;
+  /** Direction toward the player (perpendicular to meld row), for bottom-aligning rotated tiles. */
+  playerDir: [number, number, number];
+}
+
+const MELD_CONFIGS: Record<string, MeldConfig> = {
+  bottom: {
+    positionAtOffset: (offset) => [ROW_RIGHT - offset, 0.01, TABLE_EDGE - MELD_INWARD],
+    orientY: 0,
+    playerDir: [0, 0, 1],
+  },
+  top: {
+    positionAtOffset: (offset) => [-ROW_RIGHT + offset, 0.01, -(TABLE_EDGE - MELD_INWARD)],
+    orientY: Math.PI,
+    playerDir: [0, 0, -1],
+  },
+  left: {
+    positionAtOffset: (offset) => [-(TABLE_EDGE - MELD_INWARD), 0.01, -ROW_RIGHT + offset],
+    orientY: -Math.PI / 2,
+    playerDir: [-1, 0, 0],
+  },
+  right: {
+    positionAtOffset: (offset) => [TABLE_EDGE - MELD_INWARD, 0.01, ROW_RIGHT - offset],
+    orientY: Math.PI / 2,
+    playerDir: [1, 0, 0],
+  },
+};
+
+/** Single concealed kong — face-down tiles that the owner can hover to reveal. */
+function ConcealedKongMeld({
+  meld,
+  tileOffsets,
+  config,
+  isOwner,
+}: {
+  meld: Meld;
+  tileOffsets: number[];
+  config: MeldConfig;
+  isOwner: boolean;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const showFace = isOwner && hovered;
+
+  return (
+    <group
+      onPointerOver={isOwner ? () => setHovered(true) : undefined}
+      onPointerOut={isOwner ? () => setHovered(false) : undefined}
+    >
+      {meld.tiles.map((tile, j) => {
+        const worldPos = config.positionAtOffset(tileOffsets[j]);
+        const localPos: [number, number, number] = [
+          worldPos[0] / MELD_SCALE,
+          worldPos[1] / MELD_SCALE,
+          worldPos[2] / MELD_SCALE,
+        ];
+        return (
+          <group key={tile.id} position={localPos} rotation={[0, config.orientY, 0]}>
+            <TileMesh
+              face={showFace ? tile.face : undefined}
+              flat
+              position={[0, 0, 0]}
+              rotationY={0}
+              interactive={false}
+            />
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
+/** Compute world-space tile width: claimed chow tiles are rotated 90° so their
+ *  height dimension becomes the row-axis width. */
+function meldTileWorldWidth(isClaimed: boolean): number {
+  return (isClaimed ? TILE_HEIGHT : TILE_WIDTH) * MELD_SCALE;
+}
+
+/** Bottom-alignment shift for rotated claimed tiles (local coords).
+ *  The rotated tile is narrower perpendicular to the row (TILE_WIDTH vs TILE_HEIGHT),
+ *  so shift it toward the player so near edges align. */
+const CLAIMED_ALIGN_SHIFT = (TILE_HEIGHT - TILE_WIDTH) / 2;
+
+/** Meld area — exposed/concealed melds to the right of each player's hand row. */
+function MeldArea({ melds, side, isOwner }: { melds: Meld[]; side: string; isOwner: boolean }) {
+  const config = MELD_CONFIGS[side];
+  if (!config || !melds.length) return null;
+
+  // Compute per-tile offsets along the meld row (world coords).
+  // Each tile's center position accounts for its actual width (rotated tiles are wider).
+  // Tiles are reversed so ascending order reads left-to-right (row grows right-to-left).
+  let cursor = 0; // world-space distance along row
+
+  return (
+    <group scale={[MELD_SCALE, MELD_SCALE, MELD_SCALE]}>
+      {melds.map((meld, meldIdx) => {
+        if (meldIdx > 0) cursor += MELD_SPACING;
+
+        // Reverse tiles so ascending rank reads left-to-right
+        // (meld row grows right-to-left: offset 0 = rightmost position)
+        const tiles = [...meld.tiles].reverse();
+
+        // Pre-compute offsets for all tiles in this meld
+        const tileOffsets: number[] = [];
+        const tileClaimed: boolean[] = [];
+        for (let j = 0; j < tiles.length; j++) {
+          const isClaimed = meld.exposed && meld.type === "chow" && tiles[j].id === meld.claimedTileId;
+          tileClaimed.push(isClaimed);
+          const halfW = meldTileWorldWidth(isClaimed) / 2;
+          if (j > 0) cursor += MELD_TILE_GAP;
+          cursor += halfW;
+          tileOffsets.push(cursor);
+          cursor += halfW;
+        }
+
+        // Concealed kong — face-down with hover-to-flip
+        if (!meld.exposed) {
+          return (
+            <ConcealedKongMeld
+              key={meldIdx}
+              meld={meld}
+              tileOffsets={tileOffsets}
+              config={config}
+              isOwner={isOwner}
+            />
+          );
+        }
+
+        // Exposed meld — face-up tiles, chow claimed tile rotated 90° & bottom-aligned
+        return tiles.map((tile, j) => {
+          const worldPos = config.positionAtOffset(tileOffsets[j]);
+          const localPos: [number, number, number] = [
+            worldPos[0] / MELD_SCALE,
+            worldPos[1] / MELD_SCALE,
+            worldPos[2] / MELD_SCALE,
+          ];
+          const isClaimed = tileClaimed[j];
+
+          // Shift rotated tile toward player so near edges align with normal tiles
+          if (isClaimed) {
+            localPos[0] += config.playerDir[0] * CLAIMED_ALIGN_SHIFT;
+            localPos[2] += config.playerDir[2] * CLAIMED_ALIGN_SHIFT;
+          }
+
+          return (
+            <group
+              key={tile.id}
+              position={localPos}
+              rotation={[0, config.orientY + (isClaimed ? Math.PI / 2 : 0), 0]}
+            >
+              <TileMesh
+                face={tile.face}
+                flat
+                position={[0, 0, 0]}
+                rotationY={0}
+                interactive={false}
+              />
+            </group>
+          );
+        });
+      })}
+    </group>
+  );
+}
+
+/** Root overlay component — renders labels, center indicator, bonus tiles, discard areas, and melds. */
 export default function TableOverlays() {
   const gameView = useGameStore((s) => s.gameView);
   const mySeatIndex = useGameStore((s) => s.mySeatIndex);
   const room = useRoomStore((s) => s.room);
+  const highlightedTileIds = useGameStore((s) => s.highlightedTileIds);
 
   if (!gameView || mySeatIndex === null) return null;
 
@@ -469,6 +649,15 @@ export default function TableOverlays() {
   const currentTurnRelIdx = seats.indexOf(gameView.currentTurn);
   const dealerRelIdx = seats.indexOf(gameView.dealer);
 
+  // Highlight the last discarded tile when in claiming phase (client-only)
+  const highlightDiscardId =
+    gameView.turnPhase === "claiming" && gameView.lastDiscard
+      ? gameView.lastDiscard.tile.id
+      : undefined;
+
+  // Determine which seat's discard area contains the highlighted tile
+  const highlightDiscardSeat = gameView.lastDiscard?.fromSeat;
+
   return (
     <group>
       {/* Center wind/wall indicator */}
@@ -496,7 +685,12 @@ export default function TableOverlays() {
               />
             )}
             <BonusTiles tiles={player.bonusTiles} side={side} />
-            <DiscardArea tiles={player.discards} side={side} />
+            <DiscardArea
+              tiles={player.discards}
+              side={side}
+              highlightTileId={seat === highlightDiscardSeat && highlightedTileIds.length > 0 ? highlightDiscardId : undefined}
+            />
+            <MeldArea melds={player.melds} side={side} isOwner={seat === mySeatIndex} />
           </group>
         );
       })}

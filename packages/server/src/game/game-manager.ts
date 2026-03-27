@@ -1,7 +1,7 @@
 // Server-side game manager — starts games, persists state to Redis, sends player views
 
 import type { GameState } from "@mahjong/common";
-import { deal, createPlayerView, drawTile, discardTile } from "@mahjong/common";
+import { deal, createPlayerView, drawTile, discardTile, claimChow, claimPung, claimOpenKong, declareClosedKong, passClaim } from "@mahjong/common";
 import { redis } from "../redis.js";
 
 const GAME_TTL_SECONDS = 4 * 60 * 60; // 4 hours
@@ -63,5 +63,45 @@ export function handleDrawTile(gameState: GameState): GameState {
  */
 export function handleDiscardTile(gameState: GameState, tileId: number): GameState {
   discardTile(gameState, tileId); // mutates in place
+  return gameState;
+}
+
+/**
+ * Claims a chow from the last discard.
+ */
+export function handleClaimChow(gameState: GameState, claimerSeat: number, handTileIds: [number, number]): GameState {
+  claimChow(gameState, claimerSeat, handTileIds);
+  return gameState;
+}
+
+/**
+ * Claims a pung from the last discard.
+ */
+export function handleClaimPung(gameState: GameState, claimerSeat: number): GameState {
+  claimPung(gameState, claimerSeat);
+  return gameState;
+}
+
+/**
+ * Claims an open kong from the last discard.
+ */
+export function handleClaimOpenKong(gameState: GameState, claimerSeat: number): GameState {
+  claimOpenKong(gameState, claimerSeat);
+  return gameState;
+}
+
+/**
+ * Declares a closed kong from hand+drawnTile.
+ */
+export function handleDeclareClosedKong(gameState: GameState, seatIndex: number, tileIds: number[]): GameState {
+  declareClosedKong(gameState, seatIndex, tileIds);
+  return gameState;
+}
+
+/**
+ * A player passes on the current claim window.
+ */
+export function handleClaimPass(gameState: GameState, seatIndex: number): GameState {
+  passClaim(gameState, seatIndex);
   return gameState;
 }

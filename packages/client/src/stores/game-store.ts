@@ -1,7 +1,10 @@
-// Zustand store for game state — game lifecycle, local hand reorder, opponent cosmetic state
+// Zustand store for game state — game lifecycle, local hand reorder, opponent cosmetic state,
+// and meld claim detection/actions.
 
 import { create } from "zustand";
 import type { Tile, PlayerGameView } from "@mahjong/common";
+import { canChow, canPung, canOpenKong, canClosedKong } from "@mahjong/common";
+import type { ChowOption, PungOption, KongOption, ClosedKongOption } from "@mahjong/common";
 import type { TypedSocket } from "../services/socket.ts";
 
 /** Cosmetic state for an opponent's hand (what we can see without knowing their tiles). */
@@ -10,6 +13,14 @@ export interface OpponentHandState {
   dragging: { fromPosition: number; hoverPosition: number } | null; // live drag state
   /** Stable tile identities [id0, id1, …] so reorders produce smooth lerp, not snap-back. */
   tileOrder: number[];
+}
+
+/** Available meld claims computed client-side from the current game state. */
+export interface AvailableClaims {
+  chow: ChowOption[];
+  pung: PungOption | null;
+  openKong: KongOption | null;
+  closedKong: ClosedKongOption[];
 }
 
 interface GameStoreState {
@@ -24,6 +35,13 @@ interface GameStoreState {
   socket: TypedSocket | null;
   mySeatIndex: number | null;
 
+  /** Client-computed available claims. Null when no claim window is active. */
+  availableClaims: AvailableClaims | null;
+  /** Tile IDs to highlight for the current claim (client-only, not visible to opponents). */
+  highlightedTileIds: number[];
+  /** Selected chow option index (when multiple chow combinations exist). */
+  selectedChowOption: number | null;
+
   startGame: (socket: TypedSocket) => Promise<{ ok: boolean; error?: string }>;
   bindSocket: (socket: TypedSocket, userId: string) => void;
   selectTile: (tileId: number | null) => void;
@@ -31,6 +49,12 @@ interface GameStoreState {
   reorderHand: (fromIndex: number, toIndex: number) => void;
   drawTile: () => Promise<{ ok: boolean; error?: string }>;
   discardTile: (tileId: number) => Promise<{ ok: boolean; error?: string }>;
+  claimChow: (handTileIds: [number, number]) => Promise<{ ok: boolean; error?: string }>;
+  claimPung: () => Promise<{ ok: boolean; error?: string }>;
+  claimOpenKong: () => Promise<{ ok: boolean; error?: string }>;
+  claimClosedKong: (tileIds: number[]) => Promise<{ ok: boolean; error?: string }>;
+  claimPass: () => Promise<{ ok: boolean; error?: string }>;
+  selectChowOption: (index: number | null) => void;
   reset: () => void;
 }
 
@@ -42,6 +66,52 @@ function mergeHandOrder(serverHand: Tile[], currentOrder: number[]): number[] {
   return [...kept, ...added];
 }
 
+/** Compute highlighted tile IDs for available claims. */
+function computeHighlights(
+  claims: AvailableClaims,
+  lastDiscard: PlayerGameView["lastDiscard"],
+  selectedChowIdx: number | null,
+): number[] {
+  const ids: number[] = [];
+
+  // Always highlight the discard tile
+  if (lastDiscard) {
+    ids.push(lastDiscard.tile.id);
+  }
+
+  // Closed kong: highlight all 4 tiles
+  if (claims.closedKong.length > 0) {
+    for (const opt of claims.closedKong) {
+      ids.push(...opt.tileIds);
+    }
+    return ids;
+  }
+
+  // If chow options exist and one is selected, highlight those hand tiles
+  if (claims.chow.length > 0 && selectedChowIdx !== null && claims.chow[selectedChowIdx]) {
+    ids.push(...claims.chow[selectedChowIdx].handTileIds);
+  } else if (claims.chow.length > 0) {
+    // Highlight all possible chow tiles
+    const allIds = new Set<number>();
+    for (const opt of claims.chow) {
+      for (const id of opt.handTileIds) allIds.add(id);
+    }
+    ids.push(...allIds);
+  }
+
+  // Pung: highlight 2 matching hand tiles
+  if (claims.pung) {
+    ids.push(...claims.pung.handTileIds);
+  }
+
+  // Open kong: highlight 3 matching hand tiles
+  if (claims.openKong) {
+    ids.push(...claims.openKong.handTileIds);
+  }
+
+  return ids;
+}
+
 export const useGameStore = create<GameStoreState>((set, get) => ({
   gameView: null,
   handOrder: [],
@@ -50,6 +120,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   error: null,
   socket: null,
   mySeatIndex: null,
+  availableClaims: null,
+  highlightedTileIds: [],
+  selectedChowOption: null,
 
   startGame: async (socket) => {
     return new Promise((resolve) => {
@@ -69,14 +142,58 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     set({ socket });
 
     socket.on("game:state", (state) => {
-      const { handOrder } = get();
+      const { handOrder, mySeatIndex: prevSeat } = get();
       const newOrder = mergeHandOrder(state.hand, handOrder);
-      const mySeat = state.players.find((p) => p.userId === userId);
+      const mySeat = state.players.find((p) => p.userId === userId)?.seatIndex ?? null;
+
+      // Clear claim state first
+      let availableClaims: AvailableClaims | null = null;
+      let highlightedTileIds: number[] = [];
+      const selectedChowOption: number | null = null;
+
+      // Compute available claims based on new state
+      if (mySeat !== null) {
+        if (state.turnPhase === "claiming" && state.lastDiscard && state.lastDiscard.fromSeat !== mySeat) {
+          // Someone else discarded — check what we can claim
+          const claims: AvailableClaims = {
+            chow: canChow(state.hand, state.lastDiscard.tile, mySeat, state.lastDiscard.fromSeat),
+            pung: canPung(state.hand, state.lastDiscard.tile),
+            openKong: canOpenKong(state.hand, state.lastDiscard.tile),
+            closedKong: [],
+          };
+
+          const hasClaims = claims.chow.length > 0 || claims.pung !== null || claims.openKong !== null;
+
+          if (hasClaims) {
+            availableClaims = claims;
+            highlightedTileIds = computeHighlights(claims, state.lastDiscard, null);
+          } else {
+            // No claims available — auto-pass
+            setTimeout(() => {
+              get().claimPass();
+            }, 0);
+          }
+        } else if (
+          state.turnPhase === "discard" &&
+          state.currentTurn === mySeat
+        ) {
+          // Our turn to discard — check for closed kong
+          const closedKongs = canClosedKong(state.hand, state.drawnTile);
+          if (closedKongs.length > 0) {
+            availableClaims = { chow: [], pung: null, openKong: null, closedKong: closedKongs };
+            highlightedTileIds = computeHighlights(availableClaims, null, null);
+          }
+        }
+      }
+
       set({
         gameView: state,
         handOrder: newOrder,
-        mySeatIndex: mySeat?.seatIndex ?? null,
+        mySeatIndex: mySeat,
         error: null,
+        availableClaims,
+        highlightedTileIds,
+        selectedChowOption,
       });
     });
 
@@ -260,6 +377,73 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     });
   },
 
+  claimChow: async (handTileIds: [number, number]) => {
+    const { socket } = get();
+    if (!socket) return { ok: false, error: "No socket" };
+    return new Promise((resolve) => {
+      socket.emit("game:claimChow", { handTileIds }, (res) => {
+        if (!res.ok) set({ error: res.error });
+        else set({ availableClaims: null, highlightedTileIds: [], selectedChowOption: null, selectedTileId: null });
+        resolve(res);
+      });
+    });
+  },
+
+  claimPung: async () => {
+    const { socket } = get();
+    if (!socket) return { ok: false, error: "No socket" };
+    return new Promise((resolve) => {
+      socket.emit("game:claimPung", (res) => {
+        if (!res.ok) set({ error: res.error });
+        else set({ availableClaims: null, highlightedTileIds: [], selectedChowOption: null, selectedTileId: null });
+        resolve(res);
+      });
+    });
+  },
+
+  claimOpenKong: async () => {
+    const { socket } = get();
+    if (!socket) return { ok: false, error: "No socket" };
+    return new Promise((resolve) => {
+      socket.emit("game:claimOpenKong", (res) => {
+        if (!res.ok) set({ error: res.error });
+        else set({ availableClaims: null, highlightedTileIds: [], selectedChowOption: null, selectedTileId: null });
+        resolve(res);
+      });
+    });
+  },
+
+  claimClosedKong: async (tileIds: number[]) => {
+    const { socket } = get();
+    if (!socket) return { ok: false, error: "No socket" };
+    return new Promise((resolve) => {
+      socket.emit("game:claimClosedKong", { tileIds }, (res) => {
+        if (!res.ok) set({ error: res.error });
+        else set({ availableClaims: null, highlightedTileIds: [], selectedChowOption: null, selectedTileId: null });
+        resolve(res);
+      });
+    });
+  },
+
+  claimPass: async () => {
+    const { socket } = get();
+    if (!socket) return { ok: false, error: "No socket" };
+    return new Promise((resolve) => {
+      socket.emit("game:claimPass", (res) => {
+        if (!res.ok) set({ error: res.error });
+        else set({ availableClaims: null, highlightedTileIds: [], selectedChowOption: null });
+        resolve(res);
+      });
+    });
+  },
+
+  selectChowOption: (index: number | null) => {
+    const { availableClaims, gameView } = get();
+    if (!availableClaims) return;
+    const highlights = computeHighlights(availableClaims, gameView?.lastDiscard ?? null, index);
+    set({ selectedChowOption: index, highlightedTileIds: highlights });
+  },
+
   reset: () => {
     set({
       gameView: null,
@@ -269,6 +453,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       error: null,
       socket: null,
       mySeatIndex: null,
+      availableClaims: null,
+      highlightedTileIds: [],
+      selectedChowOption: null,
     });
   },
 }));
