@@ -2,6 +2,7 @@
 
 import type { Tile, TileFace, Wind } from "./tiles.js";
 import { createFullSet, shuffle, isBonusTile, sameFace } from "./tiles.js";
+import { canChow, canPung, canOpenKong } from "./melds.js";
 
 // --- State machine phases ---
 
@@ -34,6 +35,28 @@ export interface Meld {
   claimedTileId?: number;
 }
 
+// --- Claim priority ---
+
+/** A claim that has been submitted but not yet resolved (waiting for all players). */
+export interface PendingClaim {
+  seatIndex: number;
+  type: "chow" | "pung" | "openKong";
+  handTileIds?: [number, number]; // needed for chow execution
+}
+
+/** Result of resolving all pending claims after every player has decided. */
+export interface ClaimResolution {
+  winner: PendingClaim | null; // null = all passed
+  losers: number[]; // seat indices whose claims were outranked
+}
+
+/** Priority: pung/openKong (2) > chow (1). */
+const CLAIM_PRIORITY: Record<PendingClaim["type"], number> = {
+  openKong: 2,
+  pung: 2,
+  chow: 1,
+};
+
 // --- Full game state (server-authoritative) ---
 
 export interface GameState {
@@ -49,6 +72,8 @@ export interface GameState {
   lastDiscard: { tile: Tile; fromSeat: number } | null;
   /** Seat indices that have passed on the current claiming window. */
   claimPasses: number[];
+  /** Claims submitted but not yet resolved (waiting for all players to decide). */
+  pendingClaims: PendingClaim[];
 }
 
 // --- Player-visible state (sent to each client — hides other players' hands) ---
@@ -156,6 +181,7 @@ export function deal(playerIds: string[], dealer: number = 0, roundWind: Wind = 
     turnCount: 0,
     lastDiscard: null,
     claimPasses: [],
+    pendingClaims: [],
   };
 
   return { gameState };
@@ -253,10 +279,35 @@ export function discardTile(gameState: GameState, tileId: number): void {
 
   player.discards.push(discarded);
 
-  // Enter claiming phase — currentTurn stays on the discarder as a marker
-  gameState.lastDiscard = { tile: discarded, fromSeat: gameState.currentTurn };
-  gameState.claimPasses = [];
-  gameState.turnPhase = "claiming";
+  const discarderSeat = gameState.currentTurn;
+  gameState.lastDiscard = { tile: discarded, fromSeat: discarderSeat };
+  gameState.pendingClaims = [];
+
+  // Pre-compute which non-discarder players have no claims → auto-pass them server-side.
+  // This avoids client-side auto-pass race conditions with concurrent Redis writes.
+  const autoPasses: number[] = [];
+  for (let seat = 0; seat < 4; seat++) {
+    if (seat === discarderSeat) continue;
+    const p = gameState.players[seat];
+    const hasChow = canChow(p.hand, discarded, seat, discarderSeat).length > 0;
+    const hasPung = canPung(p.hand, discarded) !== null;
+    const hasKong = canOpenKong(p.hand, discarded) !== null;
+    if (!hasChow && !hasPung && !hasKong) {
+      autoPasses.push(seat);
+    }
+  }
+  gameState.claimPasses = autoPasses;
+
+  if (autoPasses.length === 3) {
+    // Nobody can claim — skip claiming phase, advance to next player's draw
+    gameState.currentTurn = (discarderSeat + 1) % 4;
+    gameState.turnPhase = "draw";
+    gameState.lastDiscard = null;
+    gameState.claimPasses = [];
+  } else {
+    gameState.turnPhase = "claiming";
+  }
+
   gameState.turnCount++;
 }
 
@@ -484,8 +535,62 @@ export function declareClosedKong(
 }
 
 /**
+ * Submits a claim on the current discard. The claim is stored as pending
+ * and only resolved when all non-discarder players have decided (claim or pass).
+ * Validates the claim is legal before storing.
+ */
+export function submitClaim(
+  gameState: GameState,
+  seatIndex: number,
+  claimType: PendingClaim["type"],
+  handTileIds?: [number, number],
+): void {
+  if (gameState.phase !== "playing") throw new Error("Game is not in playing phase");
+  if (gameState.turnPhase !== "claiming") throw new Error("Not in claiming phase");
+  if (!gameState.lastDiscard) throw new Error("No discard to claim");
+
+  const discarderSeat = gameState.lastDiscard.fromSeat;
+  if (seatIndex === discarderSeat) throw new Error("Cannot claim own discard");
+  if (gameState.claimPasses.includes(seatIndex)) throw new Error("Already passed");
+  if (gameState.pendingClaims.some((c) => c.seatIndex === seatIndex)) throw new Error("Already submitted a claim");
+
+  const claimer = gameState.players[seatIndex];
+  const discardFace = gameState.lastDiscard.tile.face;
+
+  // Type-specific validation (same as the execution functions, but without mutation)
+  switch (claimType) {
+    case "chow":
+      if ((discarderSeat + 1) % 4 !== seatIndex) {
+        throw new Error("Chow can only be claimed by the next player in turn order");
+      }
+      if (!handTileIds) throw new Error("Chow requires handTileIds");
+      // Validate tiles exist in hand
+      for (const id of handTileIds) {
+        if (!claimer.hand.some((t) => t.id === id)) {
+          throw new Error(`Tile ${id} not found in hand`);
+        }
+      }
+      break;
+
+    case "pung": {
+      const matching = claimer.hand.filter((t) => sameFace(t.face, discardFace));
+      if (matching.length < 2) throw new Error("Not enough matching tiles for pung");
+      break;
+    }
+
+    case "openKong": {
+      const matching = claimer.hand.filter((t) => sameFace(t.face, discardFace));
+      if (matching.length < 3) throw new Error("Not enough matching tiles for kong");
+      break;
+    }
+  }
+
+  gameState.pendingClaims.push({ seatIndex, type: claimType, handTileIds });
+}
+
+/**
  * A player passes on claiming the current discard.
- * When all non-discarder players have passed, advances to the next player's draw phase.
+ * Just registers the pass — call resolveClaims() afterward to check if all decided.
  */
 export function passClaim(gameState: GameState, seatIndex: number): void {
   if (gameState.phase !== "playing") throw new Error("Game is not in playing phase");
@@ -494,20 +599,59 @@ export function passClaim(gameState: GameState, seatIndex: number): void {
 
   const discarderSeat = gameState.lastDiscard.fromSeat;
   if (seatIndex === discarderSeat) throw new Error("Discarder does not need to pass");
+  if (gameState.claimPasses.includes(seatIndex)) throw new Error("Already passed");
+  if (gameState.pendingClaims.some((c) => c.seatIndex === seatIndex)) throw new Error("Already submitted a claim");
 
-  // Don't double-count passes
-  if (!gameState.claimPasses.includes(seatIndex)) {
-    gameState.claimPasses.push(seatIndex);
-  }
+  gameState.claimPasses.push(seatIndex);
+}
 
-  // Check if all 3 non-discarder players have passed
-  if (gameState.claimPasses.length >= 3) {
-    // Advance to next player's draw phase
+/**
+ * Checks whether all 3 non-discarder players have decided (claimed or passed).
+ * If so, resolves by priority: pung/openKong > chow.
+ * Returns the resolution (winner + losers), or null if not all decided yet.
+ * Mutates gameState to execute the winning claim or advance turn if all passed.
+ */
+export function resolveClaims(gameState: GameState): ClaimResolution | null {
+  const totalDecided = gameState.pendingClaims.length + gameState.claimPasses.length;
+  if (totalDecided < 3) return null; // not all decided yet
+
+  if (gameState.pendingClaims.length === 0) {
+    // All passed — advance to next player's draw phase
+    const discarderSeat = gameState.lastDiscard!.fromSeat;
     gameState.currentTurn = (discarderSeat + 1) % 4;
     gameState.turnPhase = "draw";
     gameState.lastDiscard = null;
     gameState.claimPasses = [];
+    gameState.pendingClaims = [];
+    return { winner: null, losers: [] };
   }
+
+  // Sort by priority (higher = wins)
+  const sorted = [...gameState.pendingClaims].sort(
+    (a, b) => CLAIM_PRIORITY[b.type] - CLAIM_PRIORITY[a.type],
+  );
+
+  const winner = sorted[0];
+  const losers = sorted.slice(1).map((c) => c.seatIndex);
+
+  // Clear pending state before executing (execution functions clear their own fields too)
+  gameState.pendingClaims = [];
+  gameState.claimPasses = [];
+
+  // Execute the winning claim
+  switch (winner.type) {
+    case "chow":
+      claimChow(gameState, winner.seatIndex, winner.handTileIds!);
+      break;
+    case "pung":
+      claimPung(gameState, winner.seatIndex);
+      break;
+    case "openKong":
+      claimOpenKong(gameState, winner.seatIndex);
+      break;
+  }
+
+  return { winner, losers };
 }
 
 /**

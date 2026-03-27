@@ -35,6 +35,7 @@ function GameView({
   const claimOpenKongFn = useGameStore((s) => s.claimOpenKong);
   const claimClosedKongFn = useGameStore((s) => s.claimClosedKong);
   const claimPassFn = useGameStore((s) => s.claimPass);
+  const claimRejectedMsg = useGameStore((s) => s.claimRejectedMsg);
 
   const mySeat = gameView.players.find((p) => p.userId === user?.id);
   const mySeatIndex = mySeat?.seatIndex ?? 0;
@@ -200,6 +201,13 @@ function GameView({
                 #{i + 1}
               </button>
             ))}
+          </div>
+        )}
+
+        {/* Claim rejected notification */}
+        {claimRejectedMsg && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-red-900/80 rounded-lg text-red-200 text-sm font-medium shadow-lg animate-pulse">
+            {claimRejectedMsg}
           </div>
         )}
       </div>

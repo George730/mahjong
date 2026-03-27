@@ -41,6 +41,8 @@ interface GameStoreState {
   highlightedTileIds: number[];
   /** Selected chow option index (when multiple chow combinations exist). */
   selectedChowOption: number | null;
+  /** Brief message shown when a claim is outranked by higher priority. */
+  claimRejectedMsg: string | null;
 
   startGame: (socket: TypedSocket) => Promise<{ ok: boolean; error?: string }>;
   bindSocket: (socket: TypedSocket, userId: string) => void;
@@ -123,6 +125,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   availableClaims: null,
   highlightedTileIds: [],
   selectedChowOption: null,
+  claimRejectedMsg: null,
 
   startGame: async (socket) => {
     return new Promise((resolve) => {
@@ -167,12 +170,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
           if (hasClaims) {
             availableClaims = claims;
             highlightedTileIds = computeHighlights(claims, state.lastDiscard, null);
-          } else {
-            // No claims available — auto-pass
-            setTimeout(() => {
-              get().claimPass();
-            }, 0);
           }
+          // No client-side auto-pass needed — server pre-populates passes for
+          // players with no claims to avoid concurrent Redis write races.
         } else if (
           state.turnPhase === "discard" &&
           state.currentTurn === mySeat
@@ -199,6 +199,17 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
     socket.on("game:error", (message) => {
       set({ error: message });
+    });
+
+    socket.on("game:claimRejected", (payload) => {
+      set({ claimRejectedMsg: payload.reason });
+      // Auto-dismiss after 3 seconds
+      setTimeout(() => {
+        const { claimRejectedMsg } = get();
+        if (claimRejectedMsg === payload.reason) {
+          set({ claimRejectedMsg: null });
+        }
+      }, 3000);
     });
 
     // Opponent cosmetic broadcasts
@@ -456,6 +467,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       availableClaims: null,
       highlightedTileIds: [],
       selectedChowOption: null,
+      claimRejectedMsg: null,
     });
   },
 }));

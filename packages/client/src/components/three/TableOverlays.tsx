@@ -14,7 +14,7 @@ import { useGameStore } from "../../stores/game-store.ts";
 import { useRoomStore } from "../../stores/room-store.ts";
 import { WIND_CN } from "@mahjong/common";
 import TileMesh, { TILE_WIDTH, TILE_HEIGHT } from "./TileMesh.tsx";
-import { TABLE_EDGE, ROW_LEFT } from "./layout-constants.ts";
+import { TABLE_EDGE, ROW_LEFT, SIDE_NAMES, SIDE_ANGLES, rotateAroundY } from "./layout-constants.ts";
 
 // --- Player label positions: standing upright on the wood border ---
 // Border is 0.4 wide at ±5.0 to ±5.4, height 0.25.
@@ -27,20 +27,18 @@ interface LabelConfig {
   rotation: [number, number, number];
 }
 
-const LABEL_CONFIGS: Record<string, LabelConfig> = {
-  top: {
-    position: (h) => [0, LABEL_BASE_Y + h / 2, -BORDER_MID],
-    rotation: [0, 0, 0],        // face normal +Z → faces camera
-  },
-  left: {
-    position: (h) => [-BORDER_MID, LABEL_BASE_Y + h / 2, 0],
-    rotation: [0, Math.PI / 2, 0],  // face normal → +X → faces center
-  },
-  right: {
-    position: (h) => [BORDER_MID, LABEL_BASE_Y + h / 2, 0],
-    rotation: [0, -Math.PI / 2, 0], // face normal → -X → faces center
-  },
-};
+// Labels for opponents only (no bottom/viewer label).
+// Canonical: bottom label on +Z border facing -Z (toward center).
+const LABEL_CONFIGS: Record<string, LabelConfig> = Object.fromEntries(
+  (["top", "left", "right"] as const).map((name) => {
+    const angle = SIDE_ANGLES[name];
+    return [name, {
+      position: (h: number): [number, number, number] =>
+        rotateAroundY([0, LABEL_BASE_Y + h / 2, BORDER_MID], angle),
+      rotation: [0, Math.PI + angle, 0] as [number, number, number],
+    }];
+  }),
+);
 
 // Bonus tiles: face-up, to the left of (before) each player's hand row,
 // shifted inward (toward center) by one tile depth so they don't overlap.
@@ -56,31 +54,18 @@ interface BonusConfig {
   orientY: number;
 }
 
-// Bonus tile orientY: spins the flat tile on the table so the face content
-// is right-side-up for the owning player. Applied as a group rotation around
-// world Y (not TileMesh rotationY, which would tilt the face direction).
-//   bottom: 0        (top of char toward -Z = center)
-//   top:    π        (top of char toward +Z = center from far side)
-//   right:  π/2      (top of char toward -X = center from right)
-//   left:   -π/2     (top of char toward +X = center from left)
-const BONUS_CONFIGS: Record<string, BonusConfig> = {
-  bottom: {
-    position: (i) => [ROW_LEFT + i * BONUS_GAP * BONUS_SCALE, 0.01, TABLE_EDGE - BONUS_INWARD],
-    orientY: 0,
-  },
-  top: {
-    position: (i) => [-ROW_LEFT - i * BONUS_GAP * BONUS_SCALE, 0.01, -(TABLE_EDGE - BONUS_INWARD)],
-    orientY: Math.PI,
-  },
-  left: {
-    position: (i) => [-(TABLE_EDGE - BONUS_INWARD), 0.01, ROW_LEFT + i * BONUS_GAP * BONUS_SCALE],
-    orientY: -Math.PI / 2,
-  },
-  right: {
-    position: (i) => [TABLE_EDGE - BONUS_INWARD, 0.01, -ROW_LEFT - i * BONUS_GAP * BONUS_SCALE],
-    orientY: Math.PI / 2,
-  },
-};
+// All sides derived from canonical "bottom" layout rotated around Y.
+// Canonical: bonus tiles to the LEFT of hand, shifted inward from edge.
+const BONUS_CONFIGS: Record<string, BonusConfig> = Object.fromEntries(
+  SIDE_NAMES.map((name) => {
+    const angle = SIDE_ANGLES[name];
+    return [name, {
+      position: (i: number): [number, number, number] =>
+        rotateAroundY([ROW_LEFT + i * BONUS_GAP * BONUS_SCALE, 0.01, TABLE_EDGE - BONUS_INWARD], angle),
+      orientY: angle,
+    }];
+  }),
+);
 
 // Label canvas rendering constants
 const LABEL_FONT_SIZE = 16;
@@ -351,52 +336,20 @@ interface DiscardConfig {
   orientY: number;
 }
 
-const DISCARD_CONFIGS: Record<string, DiscardConfig> = {
-  bottom: {
-    position: (row, col) => {
-      const cx = 0;
-      const cz = DISCARD_CENTER_Z;
-      const x = cx + (col - (DISCARD_COLS - 1) / 2) * DISCARD_GAP_X;
-      // Row 0 closest to center (smallest Z), row N closest to hand (largest Z)
-      const z = cz + (row - (DISCARD_ROWS - 1) / 2) * DISCARD_GAP_Z;
-      return [x, 0.01, z];
-    },
-    orientY: 0,
-  },
-  top: {
-    position: (row, col) => {
-      const cx = 0;
-      const cz = -DISCARD_CENTER_Z;
-      const x = cx - (col - (DISCARD_COLS - 1) / 2) * DISCARD_GAP_X;
-      // Row 0 closest to center (largest Z), row N closest to hand (smallest Z)
-      const z = cz - (row - (DISCARD_ROWS - 1) / 2) * DISCARD_GAP_Z;
-      return [x, 0.01, z];
-    },
-    orientY: Math.PI,
-  },
-  left: {
-    position: (row, col) => {
-      const cx = -DISCARD_CENTER_Z;
-      const cz = 0;
-      const z = cz + (col - (DISCARD_COLS - 1) / 2) * DISCARD_GAP_X;
-      // Row 0 closest to center (largest X), row N closest to hand (smallest X)
-      const x = cx - (row - (DISCARD_ROWS - 1) / 2) * DISCARD_GAP_Z;
-      return [x, 0.01, z];
-    },
-    orientY: -Math.PI / 2,
-  },
-  right: {
-    position: (row, col) => {
-      const cx = DISCARD_CENTER_Z;
-      const cz = 0;
-      const z = cz - (col - (DISCARD_COLS - 1) / 2) * DISCARD_GAP_X;
-      // Row 0 closest to center (smallest X), row N closest to hand (largest X)
-      const x = cx + (row - (DISCARD_ROWS - 1) / 2) * DISCARD_GAP_Z;
-      return [x, 0.01, z];
-    },
-    orientY: Math.PI / 2,
-  },
-};
+// Canonical: bottom discard grid centered at Z=DISCARD_CENTER_Z, rotated per side.
+const DISCARD_CONFIGS: Record<string, DiscardConfig> = Object.fromEntries(
+  SIDE_NAMES.map((name) => {
+    const angle = SIDE_ANGLES[name];
+    return [name, {
+      position: (row: number, col: number): [number, number, number] => {
+        const x = (col - (DISCARD_COLS - 1) / 2) * DISCARD_GAP_X;
+        const z = DISCARD_CENTER_Z + (row - (DISCARD_ROWS - 1) / 2) * DISCARD_GAP_Z;
+        return rotateAroundY([x, 0.01, z], angle);
+      },
+      orientY: angle,
+    }];
+  }),
+);
 
 /** Discard area — flat face-up tiles in a grid in front of each player. */
 function DiscardArea({ tiles, side, highlightTileId }: { tiles: Tile[]; side: string; highlightTileId?: number }) {
@@ -451,28 +404,19 @@ interface MeldConfig {
   playerDir: [number, number, number];
 }
 
-const MELD_CONFIGS: Record<string, MeldConfig> = {
-  bottom: {
-    positionAtOffset: (offset) => [ROW_RIGHT - offset, 0.01, TABLE_EDGE - MELD_INWARD],
-    orientY: 0,
-    playerDir: [0, 0, 1],
-  },
-  top: {
-    positionAtOffset: (offset) => [-ROW_RIGHT + offset, 0.01, -(TABLE_EDGE - MELD_INWARD)],
-    orientY: Math.PI,
-    playerDir: [0, 0, -1],
-  },
-  left: {
-    positionAtOffset: (offset) => [-(TABLE_EDGE - MELD_INWARD), 0.01, -ROW_RIGHT + offset],
-    orientY: -Math.PI / 2,
-    playerDir: [-1, 0, 0],
-  },
-  right: {
-    positionAtOffset: (offset) => [TABLE_EDGE - MELD_INWARD, 0.01, ROW_RIGHT - offset],
-    orientY: Math.PI / 2,
-    playerDir: [1, 0, 0],
-  },
-};
+// All sides derived from canonical "bottom" layout rotated around Y.
+// Canonical bottom: melds to the RIGHT of hand, row grows right-to-left (offset increases leftward).
+const MELD_CONFIGS: Record<string, MeldConfig> = Object.fromEntries(
+  SIDE_NAMES.map((name) => {
+    const angle = SIDE_ANGLES[name];
+    return [name, {
+      positionAtOffset: (offset: number): [number, number, number] =>
+        rotateAroundY([ROW_RIGHT - offset, 0.01, TABLE_EDGE - MELD_INWARD], angle),
+      orientY: angle,
+      playerDir: rotateAroundY([0, 0, 1], angle) as [number, number, number],
+    }];
+  }),
+);
 
 /** Single concealed kong — face-down tiles that the owner can hover to reveal. */
 function ConcealedKongMeld({

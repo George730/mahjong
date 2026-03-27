@@ -16,9 +16,10 @@ import type { Tile, PublicPlayerState } from "@mahjong/common";
 import { seatsFromPerspective } from "@mahjong/common";
 import { useGameStore, type OpponentHandState } from "../../stores/game-store.ts";
 import TileMesh from "./TileMesh.tsx";
-import { GAP, TABLE_EDGE, ROW_LEFT } from "./layout-constants.ts";
+import { GAP, TABLE_EDGE, ROW_LEFT, SIDE_NAMES, SIDE_ANGLES, rotateAroundY } from "./layout-constants.ts";
 
-// Per-side config: how to compute tile position and rotation
+// Per-side config: how to compute tile position and rotation.
+// All sides are derived from the canonical "bottom" layout rotated around Y.
 interface SideConfig {
   /** Position for the i-th tile */
   position: (i: number) => [number, number, number];
@@ -28,28 +29,17 @@ interface SideConfig {
   flat: boolean;
 }
 
-const SIDE_CONFIGS: Record<string, SideConfig> = {
-  bottom: {
-    position: (i) => [ROW_LEFT + i * GAP, 0, TABLE_EDGE],
-    rotationY: 0,
-    flat: true,
-  },
-  top: {
-    position: (i) => [-ROW_LEFT - i * GAP, 0, -TABLE_EDGE],
-    rotationY: Math.PI,
-    flat: false,
-  },
-  left: {
-    position: (i) => [-TABLE_EDGE, 0, ROW_LEFT + i * GAP],
-    rotationY: -Math.PI / 2,
-    flat: false,
-  },
-  right: {
-    position: (i) => [TABLE_EDGE, 0, -ROW_LEFT - i * GAP],
-    rotationY: Math.PI / 2,
-    flat: false,
-  },
-};
+const SIDE_CONFIGS: Record<string, SideConfig> = Object.fromEntries(
+  SIDE_NAMES.map((name) => {
+    const angle = SIDE_ANGLES[name];
+    return [name, {
+      position: (i: number): [number, number, number] =>
+        rotateAroundY([ROW_LEFT + i * GAP, 0, TABLE_EDGE], angle),
+      rotationY: angle,
+      flat: name === "bottom",
+    }];
+  }),
+);
 
 /** Slot X position for the viewer's hand row. */
 function slotX(slot: number): number {
@@ -295,19 +285,14 @@ function OpponentHand({
     return config.position(displaySlot);
   };
 
-  // Position for opponent's drawn tile: after the last hand tile with a gap
-  const drawnTileSlot = player.handCount;
-  const drawnPos = config.position(drawnTileSlot);
-  // Shift the drawn tile further along the row axis to create a gap
-  const drawnOffset = DRAWN_TILE_GAP;
-  let drawnTilePos: [number, number, number];
-  if (side === "top") {
-    drawnTilePos = [drawnPos[0] - drawnOffset, drawnPos[1], drawnPos[2]];
-  } else if (side === "left") {
-    drawnTilePos = [drawnPos[0], drawnPos[1], drawnPos[2] + drawnOffset];
-  } else {
-    drawnTilePos = [drawnPos[0], drawnPos[1], drawnPos[2] - drawnOffset];
-  }
+  // Position for opponent's drawn tile: after the last hand tile with a gap.
+  // Use the canonical approach: compute the position as if it were one more tile
+  // slot further along, offset by the gap, using the side's rotation.
+  const angle = SIDE_ANGLES[side as keyof typeof SIDE_ANGLES];
+  const drawnTilePos: [number, number, number] = rotateAroundY(
+    [ROW_LEFT + player.handCount * GAP + DRAWN_TILE_GAP, 0, TABLE_EDGE],
+    angle,
+  );
 
   return (
     <group>

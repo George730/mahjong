@@ -44,12 +44,17 @@ export interface ClaimClosedKongPayload {
 
 // --- Socket.IO event maps ---
 
+export interface ClaimRejectedPayload {
+  reason: string;
+}
+
 export interface ServerToClientEvents {
   "room:updated": (room: Room) => void;
   "room:error": (message: string) => void;
   "session:displaced": () => void;
   "game:state": (state: PlayerGameView) => void;
   "game:error": (message: string) => void;
+  "game:claimRejected": (payload: ClaimRejectedPayload) => void;
   "game:tileSelected": (payload: TileSelectedPayload) => void;
   "game:tileDeselected": (payload: TileDeselectedPayload) => void;
   "game:handReordered": (payload: HandReorderedPayload) => void;

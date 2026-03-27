@@ -1,7 +1,7 @@
 // Server-side game manager — starts games, persists state to Redis, sends player views
 
-import type { GameState } from "@mahjong/common";
-import { deal, createPlayerView, drawTile, discardTile, claimChow, claimPung, claimOpenKong, declareClosedKong, passClaim } from "@mahjong/common";
+import type { GameState, PendingClaim, ClaimResolution } from "@mahjong/common";
+import { deal, createPlayerView, drawTile, discardTile, declareClosedKong, submitClaim, passClaim, resolveClaims } from "@mahjong/common";
 import { redis } from "../redis.js";
 
 const GAME_TTL_SECONDS = 4 * 60 * 60; // 4 hours
@@ -67,27 +67,26 @@ export function handleDiscardTile(gameState: GameState, tileId: number): GameSta
 }
 
 /**
- * Claims a chow from the last discard.
+ * Submits a claim (chow/pung/openKong) on the current discard.
+ * The claim is stored as pending and resolved when all players have decided.
  */
-export function handleClaimChow(gameState: GameState, claimerSeat: number, handTileIds: [number, number]): GameState {
-  claimChow(gameState, claimerSeat, handTileIds);
-  return gameState;
+export function handleSubmitClaim(
+  gameState: GameState,
+  seatIndex: number,
+  claimType: PendingClaim["type"],
+  handTileIds?: [number, number],
+): ClaimResolution | null {
+  submitClaim(gameState, seatIndex, claimType, handTileIds);
+  return resolveClaims(gameState);
 }
 
 /**
- * Claims a pung from the last discard.
+ * A player passes on the current claim window.
+ * Returns resolution if all players have now decided, null otherwise.
  */
-export function handleClaimPung(gameState: GameState, claimerSeat: number): GameState {
-  claimPung(gameState, claimerSeat);
-  return gameState;
-}
-
-/**
- * Claims an open kong from the last discard.
- */
-export function handleClaimOpenKong(gameState: GameState, claimerSeat: number): GameState {
-  claimOpenKong(gameState, claimerSeat);
-  return gameState;
+export function handleClaimPass(gameState: GameState, seatIndex: number): ClaimResolution | null {
+  passClaim(gameState, seatIndex);
+  return resolveClaims(gameState);
 }
 
 /**
@@ -95,13 +94,5 @@ export function handleClaimOpenKong(gameState: GameState, claimerSeat: number): 
  */
 export function handleDeclareClosedKong(gameState: GameState, seatIndex: number, tileIds: number[]): GameState {
   declareClosedKong(gameState, seatIndex, tileIds);
-  return gameState;
-}
-
-/**
- * A player passes on the current claim window.
- */
-export function handleClaimPass(gameState: GameState, seatIndex: number): GameState {
-  passClaim(gameState, seatIndex);
   return gameState;
 }
