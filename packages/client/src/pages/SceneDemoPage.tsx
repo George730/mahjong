@@ -21,6 +21,7 @@ import HandLayout from "../components/three/HandLayout.tsx";
 import TableOverlays from "../components/three/TableOverlays.tsx";
 import { useGameStore } from "../stores/game-store.ts";
 import { useRoomStore } from "../stores/room-store.ts";
+import SidePanel from "../components/SidePanel.tsx";
 
 // --- Static demo helpers ---
 
@@ -482,6 +483,9 @@ export default function SceneDemoPage() {
           ))}
         </div>
       )}
+      {/* Fan reference panel — fixed to right edge of viewport */}
+      <SidePanel />
+
       <div style={{ width: "100%", aspectRatio: "4 / 3" }}>
         <Canvas
           shadows

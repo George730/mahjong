@@ -11,6 +11,7 @@ import CopyLinkButton from "../components/CopyLinkButton.tsx";
 import GameCanvas from "../components/three/GameCanvas.tsx";
 import HandLayout from "../components/three/HandLayout.tsx";
 import TableOverlays from "../components/three/TableOverlays.tsx";
+import SidePanel from "../components/SidePanel.tsx";
 
 /** In-game view — extracted so hooks can be used unconditionally. */
 function GameView({
@@ -93,6 +94,9 @@ function GameView({
 
   return (
     <div className="w-full max-w-5xl mx-auto mt-2 px-2 select-none" style={{ minHeight: "85vh" }}>
+      {/* Fan reference panel — fixed to right edge of viewport */}
+      <SidePanel />
+
       {/* Header bar */}
       <div className="flex items-center justify-between mb-2">
         <div className="text-sm text-gray-400">
