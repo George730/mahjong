@@ -9,3 +9,4 @@ export * from "./seat-utils.js";
 export * from "./schemas.js";
 export * from "./constants.js";
 export * from "./melds.js";
+export * from "./scoring/index.js";
