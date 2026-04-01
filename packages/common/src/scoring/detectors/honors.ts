@@ -88,7 +88,7 @@ export function daSiXi(hand: WinningHand): FanMatch[] {
   return [fm("大四喜", 88, melds)];
 }
 
-/** 小四��� (64): three wind pungs + pair of fourth wind */
+/** 小四喜 (64): three wind pungs + pair of fourth wind */
 export function xiaoSiXi(hand: WinningHand): FanMatch[] {
   let pungCount = 0;
   let pairWind = false;

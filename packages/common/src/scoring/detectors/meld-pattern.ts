@@ -15,9 +15,23 @@ export function pengPengHu(hand: WinningHand): FanMatch[] {
   return [];
 }
 
-/** Count concealed pungs (including concealed kongs treated as pungs for counting). */
+/** Count concealed pungs (including concealed kongs treated as pungs for counting).
+ *  When winning on a discard, a pung containing the win tile is NOT concealed
+ *  (it was completed by claiming the discard). */
 function countConcealedPungs(hand: WinningHand): number {
-  return hand.allMelds.filter(m => (m.type === "pung" || m.type === "kong") && m.concealed).length;
+  const isDiscard = hand.context.winSource === "discard" || hand.context.winSource === "robbingKong";
+  let count = 0;
+  let winMeldExcluded = false;
+  for (const m of hand.allMelds) {
+    if ((m.type !== "pung" && m.type !== "kong") || !m.concealed) continue;
+    // A concealed pung completed by the discarded win tile is not truly concealed
+    if (isDiscard && !winMeldExcluded && m.type === "pung" && m.tileIndices.includes(hand.winTile)) {
+      winMeldExcluded = true;
+      continue;
+    }
+    count++;
+  }
+  return count;
 }
 
 /** 四暗刻 (64): 4 concealed pungs/kongs */

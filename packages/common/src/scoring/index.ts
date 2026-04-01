@@ -5,7 +5,7 @@ export { declareHu, scoreHandFull, completeHuFromTenpai, buildWinningHand, score
 export { faceToIndex, indexToFace, tilesToCounts, isSuited, suitOf, rankOf, isTerminal, isHonor, isTerminalOrHonor, isWind, isDragon, windToIndex, EAST, SOUTH, WEST, NORTH, ZHONG, FA, BAI } from "./tile-encoding.js";
 export { findAllDecompositions, decompose, isSevenPairs, isThirteenOrphans } from "./decompose.js";
 export { FAN_REGISTRY } from "./fan-registry.js";
-export { applyExclusions, deduplicateIdenticalFans } from "./exclusions.js";
+export { applyExclusions, applyCapRules, deduplicateIdenticalFans, applyOnlyOnce } from "./exclusions.js";
 export { meldsToScoringMelds } from "./tenpai.js";
 
 export type {

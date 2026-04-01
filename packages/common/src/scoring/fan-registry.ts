@@ -26,27 +26,27 @@ export const FAN_REGISTRY: FanDef[] = [
   { id: "大四喜", score: 88, detector: daSiXi, excludes: ["三风刻", "碰碰和", "圈风刻", "门风刻"], situational: false },
   { id: "大三元", score: 88, detector: daSanYuan, excludes: ["双箭刻", "箭刻"], situational: false },
   { id: "绿一色", score: 88, detector: lvYiSe, excludes: ["混一色"], situational: false },
-  { id: "九莲宝灯", score: 88, detector: jiuLianBaoDeng, excludes: ["清一色", "门前清", "不求人"], situational: false },
+  { id: "九莲宝灯", score: 88, detector: jiuLianBaoDeng, excludes: ["清一色", "门前清", "不求人", "幺九刻"], situational: false },
   { id: "四杠", score: 88, detector: siGang, excludes: ["碰碰和", "单钓将"], situational: false },
-  { id: "连七对", score: 88, detector: lianQiDui, excludes: ["清一色", "不求人", "门前清", "七对", "无字"], situational: false },
+  { id: "连七对", score: 88, detector: lianQiDui, excludes: ["清一色", "不求人", "门前清", "七对", "无字", "单钓将"], situational: false },
   { id: "十三幺", score: 88, detector: shiSanYao, excludes: ["五门齐", "不求人", "门前清", "单钓将"], situational: false },
 
   // 64 番
-  { id: "清幺九", score: 64, detector: qingYaoJiu, excludes: ["碰碰和", "全带幺九", "双同刻", "无字"], situational: false },
+  { id: "清幺九", score: 64, detector: qingYaoJiu, excludes: ["碰碰和", "全带幺九", "无字", "幺九刻"], situational: false },
   { id: "小四喜", score: 64, detector: xiaoSiXi, excludes: ["三风刻"], situational: false },
   { id: "小三元", score: 64, detector: xiaoSanYuan, excludes: ["双箭刻", "箭刻"], situational: false },
   { id: "字一色", score: 64, detector: ziYiSe, excludes: ["碰碰和", "混幺九", "全带幺九"], situational: false },
-  { id: "四暗刻", score: 64, detector: siAnKe, excludes: ["碰碰和", "门前清", "不求人"], situational: false },
-  { id: "一色双龙会", score: 64, detector: yiSeShuangLongHui, excludes: ["一色三同顺", "七对", "清一色"], situational: false },
+  { id: "四暗刻", score: 64, detector: siAnKe, excludes: ["碰碰和", "门前清", "不求人", "三暗刻", "双暗刻"], situational: false },
+  { id: "一色双龙会", score: 64, detector: yiSeShuangLongHui, excludes: ["一色三同顺", "七对", "清一色", "平和", "缺一门", "一般高", "老少副", "无字"], situational: false },
 
   // 48 番
-  { id: "一色四同顺", score: 48, detector: yiSeSiTongShun, excludes: ["一色三同顺", "一般高", "四归一"], situational: false },
-  { id: "一色四节高", score: 48, detector: yiSeSiJieGao, excludes: ["一色三节高", "碰碰和"], situational: false },
+  { id: "一色四同顺", score: 48, detector: yiSeSiTongShun, excludes: ["一色三同顺", "一色三节高", "一般高", "四归一"], situational: false },
+  { id: "一色四节高", score: 48, detector: yiSeSiJieGao, excludes: ["一色三节高", "一色三同顺", "碰碰和"], situational: false },
 
   // 32 番
   { id: "一色四步高", score: 32, detector: yiSeSiBuGao, excludes: ["一色三步高", "连六", "老少副"], situational: false },
   { id: "三杠", score: 32, detector: sanGang, excludes: [], situational: false },
-  { id: "混幺九", score: 32, detector: hunYaoJiu, excludes: ["碰碰和", "全带幺九"], situational: false },
+  { id: "混幺九", score: 32, detector: hunYaoJiu, excludes: ["碰碰和", "全带幺九", "幺九刻"], situational: false },
 
   // 24 番
   { id: "七对", score: 24, detector: qiDui, excludes: ["不求人", "门前清"], situational: false },
@@ -64,8 +64,8 @@ export const FAN_REGISTRY: FanDef[] = [
   { id: "三色双龙会", score: 16, detector: sanSeShuangLongHui, excludes: ["喜相逢", "老少副", "平和", "无字"], situational: false },
   { id: "一色三步高", score: 16, detector: yiSeSanBuGao, excludes: [], situational: false },
   { id: "全带五", score: 16, detector: quanDaiWu, excludes: ["无字", "断幺九"], situational: false },
-  { id: "三同刻", score: 16, detector: sanTongKe, excludes: [], situational: false },
-  { id: "三暗刻", score: 16, detector: sanAnKe, excludes: [], situational: false },
+  { id: "三同刻", score: 16, detector: sanTongKe, excludes: ["双同刻"], situational: false },
+  { id: "三暗刻", score: 16, detector: sanAnKe, excludes: ["双暗刻"], situational: false },
 
   // 12 番
   { id: "全不靠", score: 12, detector: quanBuKao, excludes: ["五门齐", "不求人", "门前清"], situational: false },
@@ -86,7 +86,7 @@ export const FAN_REGISTRY: FanDef[] = [
   { id: "抢杠和", score: 8, detector: qiangGangHu, excludes: [], situational: true },
 
   // 6 番
-  { id: "双暗杠", score: 6, detector: shuangAnGang, excludes: [], situational: false },
+  { id: "双暗杠", score: 6, detector: shuangAnGang, excludes: ["暗杠"], situational: false },
   { id: "双箭刻", score: 6, detector: shuangJianKe, excludes: ["箭刻"], situational: false },
   { id: "全求人", score: 6, detector: quanQiuRen, excludes: ["单钓将"], situational: false },
   { id: "碰碰和", score: 6, detector: pengPengHu, excludes: [], situational: false },
@@ -97,7 +97,7 @@ export const FAN_REGISTRY: FanDef[] = [
   // 4 番
   { id: "全带幺九", score: 4, detector: quanDaiYaoJiu, excludes: [], situational: false },
   { id: "不求人", score: 4, detector: buQiuRen, excludes: ["自摸"], situational: false },
-  { id: "双明杠", score: 4, detector: shuangMingGang, excludes: [], situational: false },
+  { id: "双明杠", score: 4, detector: shuangMingGang, excludes: ["明杠"], situational: false },
   { id: "和绝张", score: 4, detector: huJueZhang, excludes: [], situational: true },
 
   // 2 番

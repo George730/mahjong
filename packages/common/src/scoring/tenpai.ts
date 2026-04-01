@@ -4,7 +4,7 @@ import { faceToIndex, tilesToCounts } from "./tile-encoding.js";
 import { findAllDecompositions } from "./decompose.js";
 import { buildWinningHand, scoreFans } from "./hu.js";
 import { FAN_REGISTRY } from "./fan-registry.js";
-import { applyExclusions, deduplicateIdenticalFans } from "./exclusions.js";
+import { applyExclusions, deduplicateIdenticalFans, applyOnlyOnce } from "./exclusions.js";
 import type { Tile, Wind } from "../tiles.js";
 import type { Meld } from "../game-state.js";
 import type { TenpaiResult, TenpaiWait, TenpaiContext, HandForm, FanMatch, WinContext, ScoringMeld } from "./types.js";
@@ -59,6 +59,7 @@ function scoreTenpaiDecompositions(
       fans.push(...def.detector(hand));
     }
     fans = deduplicateIdenticalFans(fans);
+    fans = applyOnlyOnce(fans);
     fans = applyExclusions(fans);
 
     const score = scoreFans(fans);

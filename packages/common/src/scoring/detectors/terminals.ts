@@ -114,7 +114,7 @@ export function yaoJiuKe(hand: WinningHand): FanMatch[] {
   for (let i = 0; i < hand.allMelds.length; i++) {
     const meld = hand.allMelds[i];
     if (meld.type === "pung" || meld.type === "kong") {
-      if (isTerminalOrHonor(meld.tileIndices[0])) {
+      if (isTerminal(meld.tileIndices[0])) {
         results.push({ fan: "幺九刻", score: 1, count: 1, involvedMelds: [i], involvedPair: false });
       }
     }

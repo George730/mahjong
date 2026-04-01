@@ -3,7 +3,7 @@
 import { faceToIndex, tilesToCounts } from "./tile-encoding.js";
 import { findAllDecompositions } from "./decompose.js";
 import { FAN_REGISTRY } from "./fan-registry.js";
-import { applyExclusions, deduplicateIdenticalFans } from "./exclusions.js";
+import { applyExclusions, applyCapRules, deduplicateIdenticalFans, applyOnlyOnce } from "./exclusions.js";
 import type {
   HandForm, WinningHand, ScoringMeld, WinContext,
   FanMatch, ScoringResult, ScoredHand, CachedTenpai, CachedWait,
@@ -71,7 +71,9 @@ function scoreDecomposition(
     fans.push(...def.detector(hand));
   }
   fans = deduplicateIdenticalFans(fans);
+  fans = applyOnlyOnce(fans);
   fans = applyExclusions(fans);
+  fans = applyCapRules(fans);
 
   return { fans, score: scoreFans(fans), hand };
 }
@@ -97,7 +99,9 @@ export function completeHuFromTenpai(
 
     // Re-apply exclusions (situational may interact)
     fans = deduplicateIdenticalFans(fans);
+    fans = applyOnlyOnce(fans);
     fans = applyExclusions(fans);
+    fans = applyCapRules(fans);
 
     const fanScore = scoreFans(fans);
     const bonusScore = context.bonusTileCount;
