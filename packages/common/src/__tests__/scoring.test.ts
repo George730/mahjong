@@ -1,23 +1,42 @@
-// Scoring integration tests — manually specify hands and expected fans/scores.
+// Scoring integration tests — manually specify hands and expected fans.
 //
-// Hand notation (compact):
+// Tile tokens:
 //   Suited: 1m-9m (万), 1s-9s (条), 1p-9p (筒)
 //   Winds:  E S W N
 //   Dragons: Z(中) F(发) B(白)
 //
-// Melds are separated by "|". Pair is the last group.
-// Prefix a meld with "!" to mark it as exposed (claimed from another player).
+// Hand: flat list of tiles currently in the closed hand (excluding the win tile).
 //
-// Examples:
-//   "1m 2m 3m|4p 5p 6p|7s 8s 9s|1p 2p 3p|Z Z"
-//   "!1m 1m 1m|2p 2p 2p|3s 3s 3s|4m 4m 4m|5s 5s"   (first meld exposed)
+// Declared melds (claimed/exposed or concealed kong), separate from hand:
+//   "c(1m 2m 3m)"       — exposed chow (吃)
+//   "p(Z Z Z)"          — exposed pung (碰)
+//   "k(9p 9p 9p 9p)"    — exposed kong (明杠)
+//   "!k(1m 1m 1m 1m)"     — concealed kong (暗杠, no "!" prefix)
+//
+// The rule engine decomposes the hand tiles itself.
 
 import { describe, it, expect } from "vitest";
 import { scoreHandFull } from "../scoring/hu.js";
-import type { WinContext, ScoringMeld, ScoringResult } from "../scoring/types.js";
+import { FAN_REGISTRY } from "../scoring/fan-registry.js";
+import type { WinContext, ScoringMeld } from "../scoring/types.js";
 
 // ---------------------------------------------------------------------------
-// Compact notation parser
+// Fan score lookup from registry
+// ---------------------------------------------------------------------------
+
+const FAN_SCORE_MAP = new Map<string, number>();
+for (const def of FAN_REGISTRY) {
+  FAN_SCORE_MAP.set(def.id, def.score);
+}
+
+function fanScore(name: string): number {
+  const score = FAN_SCORE_MAP.get(name);
+  if (score === undefined) throw new Error(`Unknown fan: "${name}"`);
+  return score;
+}
+
+// ---------------------------------------------------------------------------
+// Tile parser
 // ---------------------------------------------------------------------------
 
 /** Map compact tile token to index 0-33. */
@@ -33,104 +52,80 @@ function tileIndex(token: string): number {
   return suitOffset[suit] + (rank - 1);
 }
 
-interface ParsedHand {
-  /** Closed-hand tile counts (34-element array, before declared melds are removed). */
-  counts: number[];
-  /** Declared (exposed) melds parsed from the notation. */
-  declaredMelds: ScoringMeld[];
-  /** The win tile index (last tile of the last non-pair meld, or pair tile). */
-  winTile: number;
+/** Parse a flat tile list into a 34-element counts array. */
+function parseTiles(tiles: string): number[] {
+  const counts = new Array(34).fill(0);
+  for (const t of tiles.trim().split(/\s+/)) counts[tileIndex(t)]++;
+  return counts;
 }
 
-/**
- * Parse compact hand notation into counts + declared melds.
- *
- * Groups separated by "|". Last group = pair (2 tiles). Others = melds (3-4 tiles).
- * Prefix a meld group with "!" to mark it as exposed.
- */
-function parseHand(notation: string): ParsedHand {
-  const counts = new Array(34).fill(0);
-  const declaredMelds: ScoringMeld[] = [];
-  const groups = notation.split("|").map(g => g.trim());
+// ---------------------------------------------------------------------------
+// Declared meld parser
+// ---------------------------------------------------------------------------
 
-  // Last group is the pair
-  const pairGroup = groups[groups.length - 1];
-  const pairTokens = pairGroup.replace(/^!/, "").split(/\s+/);
-  for (const t of pairTokens) counts[tileIndex(t)]++;
+const MELD_RE = /^(!?)([cpk])\(([^)]+)\)$/;
 
-  // Meld groups
-  for (let i = 0; i < groups.length - 1; i++) {
-    let group = groups[i].trim();
-    const exposed = group.startsWith("!");
-    if (exposed) group = group.slice(1).trim();
+function parseMelds(melds: string[]): ScoringMeld[] {
+  return melds.map(m => {
+    const match = m.match(MELD_RE);
+    if (!match) throw new Error(`Invalid meld notation: "${m}". Use !c()/!p()/!k() for exposed, k() for concealed kong.`);
 
-    const tokens = group.split(/\s+/);
+    const concealed = match[1] === "!";
+    const type = match[2] as "c" | "p" | "k";
+    const tokens = match[3].trim().split(/\s+/);
     const indices = tokens.map(tileIndex);
 
-    if (exposed) {
-      const meldType = inferMeldType(indices);
-      declaredMelds.push({
-        type: meldType,
-        tileIndices: indices,
-        concealed: false,
-      });
-      // Declared meld tiles are NOT in the closed hand counts
-    } else {
-      for (const idx of indices) counts[idx]++;
-    }
-  }
+    const meldType: "chow" | "pung" | "kong" =
+      type === "c" ? "chow" : type === "p" ? "pung" : "kong";
 
-  // Win tile: last tile of the last non-pair group, or pair tile if all melds are declared
-  const lastMeldGroup = groups[groups.length - 2]?.replace(/^!/, "").trim();
-  let winTile: number;
-  if (lastMeldGroup) {
-    const lastTokens = lastMeldGroup.split(/\s+/);
-    winTile = tileIndex(lastTokens[lastTokens.length - 1]);
-  } else {
-    winTile = tileIndex(pairTokens[0]);
-  }
-
-  return { counts, declaredMelds, winTile };
-}
-
-function inferMeldType(indices: number[]): "chow" | "pung" | "kong" {
-  if (indices.length === 4) return "kong";
-  if (indices[0] === indices[1]) return "pung";
-  return "chow";
+    return { type: meldType, tileIndices: indices, concealed };
+  });
 }
 
 // ---------------------------------------------------------------------------
-// Default WinContext builder
+// Context builder
 // ---------------------------------------------------------------------------
 
-interface ContextOverrides {
+interface TestContext {
+  /** Which tile wins the hand (e.g. "3p", "Z", "E"). */
+  winTile: string;
+  /** How the win tile was obtained. Default: "selfDraw". */
   winSource?: "selfDraw" | "discard" | "kongDraw" | "robbingKong";
+  /** Player's seat wind. Default: "east". */
   seatWind?: "east" | "south" | "west" | "north";
+  /** Round wind. Default: "east". */
   roundWind?: "east" | "south" | "west" | "north";
-  isLastTile?: boolean;
+  /** Whether this player is the dealer. Default: true. */
+  isDealer?: boolean;
+  /** Tiles remaining in the wall. Default: 40. */
+  wallCount?: number;
+  /** Number of bonus (flower) tiles. Default: 0. */
   bonusTileCount?: number;
+  /** Whether the win tile is the last tile (海底/河底). Default: false. */
+  isLastTile?: boolean;
+  /** How many copies of the win tile are already visible. Default: 0. */
   winTileVisibleCount?: number;
 }
 
-function makeContext(
-  winTile: number,
-  declaredMeldCount: number,
-  overrides: ContextOverrides = {},
-): WinContext {
+function buildContext(tc: TestContext, declaredMeldCount: number): { winTileIdx: number; context: WinContext } {
+  const winTileIdx = tileIndex(tc.winTile);
   return {
-    winTile,
-    winSource: overrides.winSource ?? "selfDraw",
-    seatWind: overrides.seatWind ?? "east",
-    roundWind: overrides.roundWind ?? "east",
-    seatIndex: 0,
-    isDealer: true,
-    wallCount: 40,
-    bonusTileCount: overrides.bonusTileCount ?? 0,
-    isKongDraw: false,
-    isRobbingKong: false,
-    isLastTile: overrides.isLastTile ?? false,
-    declaredMeldCount,
-    winTileVisibleCount: overrides.winTileVisibleCount ?? 0,
+    winTileIdx,
+    context: {
+      winTile: winTileIdx,
+      winSource: tc.winSource ?? "selfDraw",
+      seatWind: tc.seatWind ?? "east",
+      roundWind: tc.roundWind ?? "east",
+      seatIndex: 0,
+      isDealer: tc.isDealer ?? true,
+      wallCount: tc.wallCount ?? 40,
+      bonusTileCount: tc.bonusTileCount ?? 0,
+      isKongDraw: (tc.winSource ?? "selfDraw") === "kongDraw",
+      isRobbingKong: (tc.winSource ?? "selfDraw") === "robbingKong",
+      isLastTile: tc.isLastTile ?? false,
+      declaredMeldCount,
+      winTileVisibleCount: tc.winTileVisibleCount ?? 0,
+    },
   };
 }
 
@@ -138,81 +133,1420 @@ function makeContext(
 // Test helper
 // ---------------------------------------------------------------------------
 
-interface ExpectedFan {
-  name: string;
-  score: number;
-}
-
 /**
- * Score a hand and assert expected fans and total score.
+ * Score a hand and assert the exact set of expected fan names.
  *
- * @param notation  Compact hand notation (see top of file)
- * @param expected  Array of { name, score } for each expected fan
- * @param totalScore  Expected total fan score (excluding bonus tiles)
- * @param ctx  Optional context overrides
+ * @param hand       Flat tile list in the closed hand (excluding the win tile).
+ * @param melds      Declared melds (exposed or concealed kong), NOT in hand tiles.
+ * @param expectedFans  Fan names. Repeat a name for multiple instances.
+ * @param tc         Win tile, win source, seat/round wind, etc.
  */
 function expectScore(
-  notation: string,
-  expected: ExpectedFan[],
-  totalScore: number,
-  ctx?: ContextOverrides,
+  hand: string,
+  melds: string[],
+  expectedFans: string[],
+  tc: TestContext,
 ) {
-  const { counts, declaredMelds, winTile } = parseHand(notation);
-  const context = makeContext(winTile, declaredMelds.length, ctx);
-  const result = scoreHandFull(counts, declaredMelds, winTile, context);
+  const counts = parseTiles(hand);
+  const declaredMelds = parseMelds(melds);
+  const { winTileIdx, context } = buildContext(tc, declaredMelds.length);
+  counts[winTileIdx]++;
+  const result = scoreHandFull(counts, declaredMelds, winTileIdx, context);
 
   expect(result.isWin).toBe(true);
   const scored = result.result!;
 
-  // Check total fan score
-  expect(scored.fanScore).toBe(totalScore);
-
-  // Check each expected fan is present
-  const fanMap = new Map<string, number>();
-  for (const f of scored.fans) {
-    fanMap.set(f.fan, (fanMap.get(f.fan) ?? 0) + f.score * f.count);
+  // Build expected fan counts and total score
+  const expectedCounts = new Map<string, number>();
+  let expectedTotal = 0;
+  for (const name of expectedFans) {
+    expectedCounts.set(name, (expectedCounts.get(name) ?? 0) + 1);
+    expectedTotal += fanScore(name);
   }
 
-  for (const e of expected) {
-    expect(fanMap.get(e.name), `Expected fan "${e.name}" with score ${e.score}`).toBe(e.score);
+  // Build actual fan counts
+  const actualCounts = new Map<string, number>();
+  for (const f of scored.fans) {
+    actualCounts.set(f.fan, (actualCounts.get(f.fan) ?? 0) + f.count);
+  }
+
+  // Compare and log on mismatch
+  const expectedStr = [...expectedCounts].sort(([a], [b]) => a.localeCompare(b))
+  .map(([n, c]) => c > 1 ? `${n}×${c}` : n).join(", ");
+  const actualStr = [...actualCounts].sort(([a], [b]) => a.localeCompare(b))
+  .map(([n, c]) => c > 1 ? `${n}×${c}` : n).join(", ");
+  const match = expectedStr === actualStr && scored.fanScore === expectedTotal;
+  if (!match) {
+    console.log(`  expected: [${expectedStr}] = ${expectedTotal}`);
+    console.log(`  actual:   [${actualStr}] = ${scored.fanScore}`);
+  }
+
+  // Check each expected fan is present with correct count
+  for (const [name, count] of expectedCounts) {
+    expect(actualCounts.get(name), `Expected fan "${name}" ×${count}`).toBe(count);
   }
 
   // Check no unexpected fans
-  for (const [name] of fanMap) {
-    expect(expected.some(e => e.name === name), `Unexpected fan "${name}" scored`).toBe(true);
+  for (const [name] of actualCounts) {
+    expect(expectedCounts.has(name), `Unexpected fan "${name}" scored`).toBe(true);
   }
+
+  // Check total fan score
+  expect(scored.fanScore).toBe(expectedTotal);
 }
 
 // ===========================================================================
-// TEST CASES — add your hands below
+// 88 番
 // ===========================================================================
 
-describe("Scoring integration", () => {
+describe("88 fan", () => {
 
-  // 花龙 + 喜相逢 (套算一次: 连六 excluded because 1p2p3p already used by 花龙)
-  it("花龙 + 喜相逢 + 不求人 + 边张", () => {
+  // 大四喜: 4 wind pungs + pair
+  it("大四喜1", () => {
     expectScore(
-      "1m 2m 3m|4p 5p 6p|7s 8s 9s|1p 2p 3p|Z Z",
-      [
-        { name: "花龙", score: 8 },
-        { name: "喜相逢", score: 1 },
-        { name: "不求人", score: 4 },
-        { name: "边张", score: 1 },
-      ],
-      14,
+      "E E E S S S W W W N N N 9s",
+      [],
+      ["大四喜", "四暗刻", "混幺九", "混一色", "单钓将", "不求人"],
+      { winTile: "9s" },
+    );
+  });
+  it("大四喜2", () => {
+    expectScore(
+      "E E E S S S W W W N N N 9s",
+      [],
+      ["大四喜", "四暗刻", "混幺九", "混一色", "单钓将"],
+      { winTile: "9s", winSource: "discard"},
+    );
+  });
+  it("大四喜3", () => {
+    expectScore(
+      "S S S W W W N N N 9s",
+      ["p(E E E)"],
+      ["大四喜", "混幺九", "三暗刻", "混一色", "单钓将"],
+      { winTile: "9s", winSource: "discard"},
+    );
+  });
+  it("大四喜4", () => {
+    expectScore(
+      "S S S W W W N N N Z",
+      ["p(E E E)"],
+      ["大四喜", "字一色", "三暗刻", "单钓将"],
+      { winTile: "Z", winSource: "discard"},
     );
   });
 
-  // Template: copy and fill in
-  // it("description", () => {
-  //   expectScore(
-  //     "HAND NOTATION HERE",
-  //     [
-  //       { name: "FAN_NAME", score: SCORE },
-  //     ],
-  //     TOTAL_SCORE,
-  //     { /* optional context overrides */ },
-  //   );
-  // });
+  // 大三元: 3 dragon pungs
+  it("大三元1", () => {
+    expectScore(
+      "Z Z Z F F F B B B 1m 2m 3m 9s",
+      [],
+      ["大三元", "三暗刻", "全带幺九", "门前清", "缺一门", "单钓将"],
+      { winTile: "9s", winSource: "discard" },
+    );
+  });
+  it("大三元2", () => {
+    expectScore(
+      "Z Z Z F F F B B 1m 2m 3m 9s 9s",
+      [],
+      ["大三元", "全带幺九", "门前清", "双暗刻", "缺一门"],
+      { winTile: "B", winSource: "discard" },
+    );
+  });
+  it("大三元3", () => {
+    expectScore(
+      "Z Z Z F F F B B B E E N N",
+      [],
+      ["大三元", "字一色", "三暗刻", "圈风刻", "门风刻", "门前清"],
+      { winTile: "E", winSource: "discard" },
+    );
+  });
 
+  // 绿一色: all green tiles (2s 3s 4s 6s 8s F)
+  it("绿一色1", () => {
+    expectScore(
+      "2s 3s 4s 4s 4s 4s 6s 6s 6s F F 8s 8s",
+      [],
+      ["绿一色", "箭刻", "门前清", "四归一", "双暗刻"],
+      { winTile: "F", winSource: "discard" },
+    );
+  });
+  it("绿一色2", () => {
+    expectScore(
+      "2s 2s 2s 3s 3s 3s 4s 4s 4s 8s 8s 6s 6s",
+      [],
+      ["绿一色", "清一色", "一色三节高", "三暗刻", "碰碰和", "门前清", "断幺九"],
+      { winTile: "8s", winSource: "discard" },
+    );
+  });
+  it("绿一色3", () => {
+    expectScore(
+      "3s 3s 3s 4s 4s 4s 8s 8s 6s 6s",
+      ["p(2s 2s 2s)"],
+      ["绿一色", "清一色", "一色三节高", "碰碰和", "双暗刻", "断幺九"],
+      { winTile: "8s", winSource: "discard" },
+    );
+  });
+
+  // 九莲宝灯: 1112345678999 + any same-suit tile
+  it("九莲宝灯1", () => {
+    expectScore(
+      "1m 1m 1m 2m 3m 4m 5m 6m 7m 8m 9m 9m 9m",
+      [],
+      ["九莲宝灯", "清龙", "四归一"], 
+      { winTile: "9m", winSource: "discard" },
+    );
+  });
+  it("九莲宝灯2", () => {
+    expectScore(
+      "1m 1m 1m 2m 3m 4m 5m 6m 7m 8m 9m 9m 9m",
+      [],
+      ["九莲宝灯", "清龙", "四归一", "自摸"], 
+      { winTile: "9m" },
+    );
+  });
+  it("九莲宝灯3", () => {
+    expectScore(
+      "1m 1m 1m 2m 3m 4m 5m 6m 7m 8m 9m 9m 9m",
+      [],
+      ["九莲宝灯", "双暗刻", "连六", "幺九刻"], 
+      { winTile: "8m", winSource: "discard" },
+    );
+  });
+  it("九莲宝灯4", () => {
+    expectScore(
+      "1m 1m 1m 2m 3m 4m 5m 6m 7m 8m 9m 9m 9m",
+      [],
+      ["九莲宝灯", "双暗刻", "连六", "幺九刻", "自摸"], 
+      { winTile: "8m" },
+    );
+  });
+  it("九莲宝灯5", () => {
+    expectScore(
+      "1m 1m 1m 2m 3m 4m 5m 6m 7m 8m 9m 9m 9m",
+      [],
+      ["九莲宝灯", "连六"], 
+      { winTile: "7m", winSource: "discard" },
+    );
+  });
+  it("九莲宝灯6", () => {
+    expectScore(
+      "1m 1m 1m 2m 3m 4m 5m 6m 7m 8m 9m 9m 9m",
+      [],
+      ["九莲宝灯", "连六", "自摸"], 
+      { winTile: "7m" },
+    );
+  });
+  it("九莲宝灯7", () => {
+    expectScore(
+      "1m 1m 1m 2m 3m 4m 5m 6m 7m 8m 9m 9m 9m",
+      [],
+      ["九莲宝灯", "双暗刻", "幺九刻"], 
+      { winTile: "5m", winSource: "discard" },
+    );
+  });
+  it("九莲宝灯8", () => {
+    expectScore(
+      "1m 1m 1m 2m 3m 4m 5m 6m 7m 8m 9m 9m 9m",
+      [],
+      ["九莲宝灯", "双暗刻", "幺九刻", "自摸"], 
+      { winTile: "5m" },
+    );
+  });
+  it("九莲宝灯9", () => {
+    expectScore(
+      "1m 1m 1m 1m 2m 3m 4m 5m 6m 7m 8m 9m 9m",
+      [],
+      ["清一色", "清龙", "门前清", "四归一", "幺九刻", "单钓将"], 
+      { winTile: "9m", winSource: "discard" },
+    );
+  });
+  it("九莲宝灯10", () => {
+    expectScore(
+      "1m 1m 1m 1m 2m 3m 4m 5m 6m 7m 8m 9m 9m",
+      [],
+      ["清一色", "清龙", "不求人", "四归一", "幺九刻", "单钓将"], 
+      { winTile: "9m" },
+    );
+  });
+
+  // 四杠: 4 kongs (all exposed) + pair in hand
+  it("四杠1", () => {
+    expectScore(
+      "7m",
+      ["k(7s 7s 7s 7s)", "k(8m 8m 8m 8m)", "k(9p 9p 9p 9p)", "k(9s 9s 9s 9s)"],
+      ["四杠", "全大", "三色三节高", "全求人", "双同刻", "幺九刻", "幺九刻"],
+      { winTile: "7m", winSource: "discard" },
+    );
+  });
+  it("四杠2", () => {
+    expectScore(
+      "7m",
+      ["k(7s 7s 7s 7s)", "!k(8m 8m 8m 8m)", "k(9p 9p 9p 9p)", "k(9s 9s 9s 9s)"],
+      ["四杠", "全大", "三色三节高", "暗杠", "双同刻", "幺九刻", "幺九刻"],
+      { winTile: "7m", winSource: "discard" },
+    );
+  });
+  it("四杠3", () => {
+    expectScore(
+      "7m",
+      ["k(7s 7s 7s 7s)", "!k(8m 8m 8m 8m)", "!k(9p 9p 9p 9p)", "k(9s 9s 9s 9s)"],
+      ["四杠", "全大", "三色三节高", "双暗杠", "双同刻", "幺九刻", "幺九刻"],
+      { winTile: "7m", winSource: "discard" },
+    );
+  });
+  it("四杠4", () => {
+    expectScore(
+      "7m",
+      ["k(7s 7s 7s 7s)", "!k(8m 8m 8m 8m)", "!k(9p 9p 9p 9p)", "k(9s 9s 9s 9s)"],
+      ["四杠", "全大", "三色三节高", "双暗杠", "双同刻", "幺九刻", "幺九刻", "自摸"],
+      { winTile: "7m" },
+    );
+  });
+  it("四杠5", () => {
+    expectScore(
+      "W",
+      ["k(1m 1m 1m 1m)", "k(1p 1p 1p 1p)", "k(1s 1s 1s 1s)", "k(F F F F)"],
+      ["四杠", "混幺九", "三同刻", "五门齐", "全求人", "箭刻"],
+      { winTile: "W", winSource: "discard" },
+    );
+  });
+  it("四杠6", () => {
+    expectScore(
+      "W",
+      ["k(1m 1m 1m 1m)", "k(1p 1p 1p 1p)", "k(1s 1s 1s 1s)", "k(F F F F)"],
+      ["四杠", "混幺九", "三同刻", "五门齐", "箭刻", "自摸"],
+      { winTile: "W" },
+    );
+  });
+  it("四杠7", () => {
+    expectScore(
+      "W",
+      ["!k(1m 1m 1m 1m)", "!k(1p 1p 1p 1p)", "!k(1s 1s 1s 1s)", "!k(F F F F)"],
+      ["四杠", "四暗刻", "混幺九", "三同刻", "五门齐", "箭刻", "不求人"],
+      { winTile: "W" },
+    );
+  });
+  it("四杠8", () => {
+    expectScore(
+      "W",
+      ["!k(1m 1m 1m 1m)", "!k(1p 1p 1p 1p)", "!k(1s 1s 1s 1s)", "!k(F F F F)"],
+      ["四杠", "四暗刻", "混幺九", "三同刻", "五门齐", "箭刻"],
+      { winTile: "W", winSource: "discard" },
+    );
+  });
+
+  // 连七对: 7 consecutive pairs in one suit
+  it("连七对1", () => {
+    expectScore(
+      "1m 1m 2m 2m 3m 3m 4m 4m 5m 5m 6m 6m 7m",
+      [],
+      ["连七对"],
+      { winTile: "7m", winSource: "discard" },
+    );
+  });
+  it("连七对2", () => {
+    expectScore(
+      "2m 2m 3m 3m 4m 4m 5m 5m 6m 6m 7m 7m 8m",
+      [],
+      ["连七对", "自摸", "断幺九"],
+      { winTile: "8m" },
+    );
+  });
+
+  // 十三幺: 13 orphans + 1 duplicate
+  it("十三幺1", () => {
+    expectScore(
+      "1m 1m 1p 9p 1s 9s E S W N Z F B",
+      [],
+      ["十三幺", "自摸"],
+      { winTile: "9m" },
+    );
+  });
+  it("十三幺2", () => {
+    expectScore(
+      "1m 1m 1p 9p 1s 9s E S W N Z F B",
+      [],
+      ["十三幺"],
+      { winTile: "9m", winSource: "discard" },
+    );
+  });
+  it("十三幺3", () => {
+    expectScore(
+      "1m 9m 1p 9p 1s 9s E S W N Z F B",
+      [],
+      ["十三幺"],
+      { winTile: "1m", winSource: "discard" },
+    );
+  });
+});
+
+// ===========================================================================
+// 64 番
+// ===========================================================================
+
+describe("64 fan", () => {
+
+  // 清幺九: all terminal (1/9) pungs only, no honors
+  it("清幺九1", () => {
+    expectScore(
+      "1m 1m 1m 1p 1p 1p 9m 9m 9m 9s 9s 9s 1s",
+      [],
+      ["清幺九", "四暗刻", "双同刻", "单钓将", "不求人"],
+      { winTile: "1s" },
+    );
+  });
+  it("清幺九2", () => {
+    expectScore(
+      "1m 1m 1p 1p 1s 1s 9m 9m 9p 9p 9s 9s 9s",
+      [],
+      ["清幺九", "七对", "四归一", "自摸"],
+      { winTile: "9s" },
+    );
+  });
+  it("清幺九3", () => {
+    expectScore(
+      "1m 1m 1p 1p 1s 1s 9m 9m 9p 9p 9s 9s 9s",
+      [],
+      ["清幺九", "七对", "四归一"],
+      { winTile: "9s", winSource: "discard"},
+    );
+  });
+
+  // 小四喜: 3 wind pungs + wind pair
+  it("小四喜1", () => {
+    expectScore(
+      "E E E S S S W W W 9s 9s N N",
+      [],
+      ["小四喜", "四暗刻", "混幺九", "混一色", "圈风刻", "门风刻", "不求人"],
+      { winTile: "9s" },
+    );
+  });
+  it("小四喜2", () => {
+    expectScore(
+      "S S S W W W 9s 9s N N",
+      ["p(E E E)"],
+      ["小四喜", "混幺九", "混一色", "三暗刻", "圈风刻", "门风刻", "自摸"],
+      { winTile: "9s" },
+    );
+  });
+  it("小四喜3", () => {
+    expectScore(
+      "W W W 9s 9s N N",
+      ["p(E E E)", "p(S S S)"],
+      ["小四喜", "混幺九", "混一色", "双暗刻", "门风刻", "自摸"],
+      { winTile: "9s", roundWind: "north"},
+    );
+  });
+  it("小四喜4", () => {
+    expectScore(
+      "W W W 9s 9s N N",
+      ["p(E E E)", "p(S S S)"],
+      ["小四喜", "混幺九", "混一色", "门风刻"],
+      { winTile: "9s", roundWind: "north", winSource: "discard"},
+    );
+  });
+  it("小四喜5", () => {
+    expectScore(
+      "9s 9s N N",
+      ["p(E E E)", "p(S S S)", "p(W W W)"],
+      ["小四喜", "混幺九", "混一色", "自摸"],
+      { winTile: "9s", roundWind: "north", seatWind: "north"},
+    );
+  });
+  it("小四喜6", () => {
+    expectScore(
+      "8s 8s N N",
+      ["p(E E E)", "p(S S S)", "p(W W W)"],
+      ["小四喜", "碰碰和", "混一色", "自摸"],
+      { winTile: "8s", roundWind: "north", seatWind: "north"},
+    );
+  });
+
+  // 小三元: 2 dragon pungs + dragon pair
+  it("小三元1", () => {
+    expectScore(
+      "Z Z Z F F F 1p 1p 1p 1s 1s 1s B",
+      [],
+      ["小三元", "四暗刻", "混幺九", "不求人", "双同刻", "缺一门", "单钓将"],
+      { winTile: "B" },
+    );
+  });
+  it("小三元2", () => {
+    expectScore(
+      "Z Z Z F F F 1p 2p 3p 7p 8p 9p B",
+      [],
+      ["小三元", "混一色", "全带幺九", "双暗刻", "老少副", "不求人", "单钓将"],
+      { winTile: "B" },
+    );
+  });
+  it("小三元3", () => {
+    expectScore(
+      "Z Z Z F F F 1p 2p 3p 4s 5s 6s B",
+      [],
+      ["小三元", "双暗刻", "缺一门", "不求人", "单钓将"],
+      { winTile: "B" },
+    );
+  });
+  it("小三元4", () => {
+    expectScore(
+      "F F F 1p 2p 3p 4p 5p 6p B",
+      ["p(Z Z Z)"],
+      ["小三元", "混一色", "连六", "单钓将", "自摸"],
+      { winTile: "B" },
+    );
+  });
+
+  // 字一色: all honor tiles
+  it("字一色1", () => {
+    expectScore(
+      "E E E S S Z Z Z F F F W W",
+      [],
+      ["字一色", "三暗刻", "双箭刻", "圈风刻", "门风刻", "门前清"],
+      { winTile: "S", winSource: "discard" },
+    );
+  });
+  it("字一色2", () => {
+    expectScore(
+      "S S W W",
+      ["p(E E E)", "p(Z Z Z)", "p(F F F)"],
+      ["字一色", "双箭刻", "圈风刻", "门风刻"],
+      { winTile: "S", winSource: "discard" },
+    );
+  });
+  it("字一色3", () => {
+    expectScore(
+      "S S W W",
+      ["p(E E E)", "p(Z Z Z)", "p(F F F)"],
+      ["字一色", "双箭刻", "圈风刻", "门风刻", "自摸"],
+      { winTile: "S" },
+    );
+  });
+
+  // 四暗刻: 4 concealed pungs, self-draw
+  it("四暗刻1?", () => {
+    expectScore(
+      "1m 1m 1m 5p 5p 5p 9s 9s 9s 3m 3m 3m 7p",
+      [],
+      ["四暗刻", "幺九刻", "幺九刻", "无字", "不求人", "单钓将"],
+      // ["四暗刻", "幺九刻", "幺九刻", "无字", "不求人"],
+      { winTile: "7p" },
+    );
+  });
+  it("四暗刻2?", () => {
+    expectScore(
+      "1m 1m 1m 5p 5p 5p 9s 9s 9s 3m 3m 3m 7p",
+      [],
+      ["四暗刻", "幺九刻", "幺九刻", "无字", "单钓将"],
+      // ["四暗刻", "幺九刻", "幺九刻", "无字"],
+      { winTile: "7p", winSource: "discard" },
+    );
+  });
+  it("四暗刻3", () => {
+    expectScore(
+      "7p",
+      ["!k(1m 1m 1m 1m)", "!k(5p 5p 5p 5p)", "!k(9s 9s 9s 9s)", "!k(6s 6s 6s 6s)"],
+      ["四杠", "四暗刻", "幺九刻", "幺九刻", "无字"],
+      { winTile: "7p", winSource: "discard" },
+    );
+  });
+  it("四暗刻4", () => {
+    expectScore(
+      "7p",
+      ["!k(1m 1m 1m 1m)", "!k(5p 5p 5p 5p)", "!k(9s 9s 9s 9s)", "!k(6s 6s 6s 6s)"],
+      ["四杠", "四暗刻", "不求人", "幺九刻", "幺九刻", "无字"],
+      { winTile: "7p" },
+    );
+  });
+  it("四暗刻5", () => {
+    expectScore(
+      "7p 1m 1m 1m",
+      ["!k(5p 5p 5p 5p)", "!k(9s 9s 9s 9s)", "!k(6s 6s 6s 6s)"],
+      ["四暗刻", "三杠", "不求人", "幺九刻", "幺九刻", "无字", "单钓将"],
+      { winTile: "7p" },
+    );
+  });
+
+  // 一色双龙会: same suit 123+789+123+789 + 55 pair
+  it("一色双龙会1", () => {
+    expectScore(
+      "1s 2s 3s 7s 8s 9s 1s 2s 3s 7s 8s 5s 5s",
+      [],
+      ["一色双龙会", "不求人"],
+      { winTile: "9s" },
+    );
+  });
+  it("一色双龙会2", () => {
+    expectScore(
+      "1s 2s 3s 7s 8s 9s 1s 2s 3s 7s 8s 5s 5s",
+      [],
+      ["一色双龙会", "门前清"],
+      { winTile: "9s", winSource: "discard" },
+    );
+  });
+  it("一色双龙会3", () => {
+    expectScore(
+      "1s 2s 3s 7s 8s 9s 1s 2s 3s 7s 8s 9s 5s",
+      [],
+      ["一色双龙会", "门前清", "单钓将"],
+      { winTile: "5s", winSource: "discard" },
+    );
+  });
+});
+
+// ===========================================================================
+// 48 番
+// ===========================================================================
+
+describe("48 fan", () => {
+
+  // 一色四同顺: 4 identical chows in same suit
+  it("一色四同顺1", () => {
+    expectScore(
+      "2s 3s 4s 2s 3s 4s 2s 3s 4s 2s 3s 4s 8s",
+      [],
+      ["绿一色", "一色四同顺", "清一色", "不求人", "平和", "断幺九", "单钓将"],
+      { winTile: "8s" },
+    );
+  });
+  it("一色四同顺2", () => {
+    expectScore(
+      "2s 3s 4s 2s 3s 4s 2s 3s 4s 2s 3s 8s 8s",
+      [],
+      ["绿一色", "一色四同顺", "清一色", "门前清", "平和", "断幺九"],
+      { winTile: "4s", winSource: "discard" },
+    );
+  });
+  it("一色四同顺3", () => {
+    expectScore(
+      "2s 3s 4s 2s 3s 4s 2s 3s 8s 8s",
+      ["c(2s 3s 4s)"],
+      ["绿一色", "一色四同顺", "清一色", "平和", "断幺九"],
+      { winTile: "4s", winSource: "discard" },
+    );
+  });
+
+  // 一色四节高: 4 consecutive pungs in same suit (e.g. 1p 2p 3p 4p)
+  it("一色四节高1", () => {
+    expectScore(
+      "1p 1p 1p 2p 2p 2p 3p 3p 3p 4p 4p 4p 2s",
+      [],
+      ["四暗刻", "一色四节高", "小于五", "推不倒", "不求人", "幺九刻", "单钓将"],
+      { winTile: "2s" },
+    );
+  });
+  it("一色四节高2", () => {
+    expectScore(
+      "4p 4p 4p 2s",
+      ["p(1p 1p 1p)", "p(2p 2p 2p)", "p(3p 3p 3p)"],
+      ["一色四节高", "小于五", "推不倒", "自摸", "幺九刻", "单钓将"],
+      { winTile: "2s" },
+    );
+  });
+  it("一色四节高3", () => {
+    expectScore(
+      "4p 4p 2s 2s",
+      ["p(1p 1p 1p)", "p(2p 2p 2p)", "p(3p 3p 3p)"],
+      ["一色四节高", "小于五", "推不倒", "自摸", "幺九刻"],
+      { winTile: "4p" },
+    );
+  });
+  it("一色四节高4", () => {
+    expectScore(
+      "2s",
+      ["p(1p 1p 1p)", "p(2p 2p 2p)", "p(3p 3p 3p)", "p(4p 4p 4p)"],
+      ["一色四节高", "小于五", "推不倒", "全求人", "幺九刻"],
+      { winTile: "2s", winSource: "discard" },
+    );
+  });
+});
+
+// ===========================================================================
+// 32 番
+// ===========================================================================
+
+describe("32 fan", () => {
+
+  // 一色四步高: 4 chows stepping +1 in same suit
+  it("一色四步高1", () => {
+    expectScore(
+      "2m 3m 4m 3m 4m 5m 4m 5m 6m 5m 6m N N",
+      [],
+      ["一色四步高", "混一色", "不求人"],
+      { winTile: "7m" },
+    );
+  });
+  it("一色四步高2", () => {
+    expectScore(
+      "2m 3m 4m 3m 4m 5m 4m 5m 6m 5m 7m N N",
+      [],
+      ["一色四步高", "混一色", "门前清"],
+      { winTile: "6m", winSource: "discard" },
+    );
+  });
+  // 一色四步高: 4 chows stepping +2 in same suit
+  it("一色四步高3", () => {
+    expectScore(
+      "1p 2p 3p 3p 4p 5p 5p 6p 7p 7p 8p 9p 9s",
+      [],
+      ["一色四步高", "不求人", "平和", "缺一门", "单钓将"],
+      { winTile: "9s" },
+    );
+  });
+  it("一色四步高4", () => {
+    expectScore(
+      "1p 3p 3p 4p 5p 5p 6p 7p 7p 8p 9p 9s 9s",
+      [],
+      ["一色四步高", "门前清", "平和", "缺一门", "坎张"],
+      { winTile: "2p", winSource: "discard" },
+    );
+  });
+  it("一色四步高5", () => {
+    expectScore(
+      "1p 2p 3p 4p 5p 5p 6p 7p 7p 8p 9p 9s 9s",
+      [],
+      ["一色四步高", "门前清", "平和", "缺一门"],
+      { winTile: "3p", winSource: "discard" },
+    );
+  });
+
+  // 三杠: 3 kongs
+  it("三杠1", () => {
+    expectScore(
+      "1m 2m 4p 4p",
+      ["k(2s 2s 2s 2s)", "!k(3p 3p 3p 3p)", "k(4m 4m 4m 4m)"],
+      ["三杠", "小于五", "三色三节高", "边张", "自摸"],
+      { winTile: "3m" },
+    );
+  });
+  it("三杠2", () => {
+    expectScore(
+      "1m 2m 4p 4p",
+      ["k(2s 2s 2s 2s)", "k(3p 3p 3p 3p)", "k(4m 4m 4m 4m)"],
+      ["三杠", "小于五", "三色三节高", "边张", "自摸"],
+      { winTile: "3m" },
+    );
+  });
+  it("三杠3", () => {
+    expectScore(
+      "1m 2m 4p 4p",
+      ["k(2s 2s 2s 2s)", "!k(3p 3p 3p 3p)", "!k(4m 4m 4m 4m)"],
+      ["三杠", "小于五", "三色三节高", "双暗刻", "边张", "自摸"],
+      { winTile: "3m" },
+    );
+  });
+
+  // 混幺九: terminals + honors, all pungs/pairs
+  it("混幺九1", () => {
+    expectScore(
+      "1m 1m 1m 1p 1p 1p 1s 1s 1s B B E E",
+      [],
+      ["四暗刻", "混幺九", "三同刻", "五门齐", "不求人", "箭刻"],
+      { winTile: "B" },
+    );
+  });
+  it("混幺九2", () => {
+    expectScore(
+      "1m 1m 1p 1p 9p 9p E E E E S S F",
+      [],
+      ["混幺九", "七对", "四归一", "缺一门"],
+      { winTile: "F", winSource: "discard" },
+    );
+  });
+});
+
+// ===========================================================================
+// 24 番
+// ===========================================================================
+
+describe("24 fan", () => {
+
+  // 七对: 7 pairs
+  it("七对", () => {
+    expectScore(
+      "1m 1m 6m 6m 7m 7m 4p 4p 9s 9s S S F F",
+      [],
+      [], // TODO
+      { winTile: "F" },
+    );
+  });
+
+  // 七星不靠: 7 honors + 7 suited tiles (knitted pattern)
+  // NOTE: decomposer currently only handles 9 knitted + 5 honors (全不靠), not 7+7 (七星不靠)
+  it.skip("七星不靠", () => {
+    expectScore(
+      "1m 4m 2p 8p 3s 6s 9s E S W N Z F B",
+      [],
+      [], // TODO
+      { winTile: "B" },
+    );
+  });
+
+  // 全双刻: all even-number pungs
+  it("全双刻", () => {
+    expectScore(
+      "2m 2m 2m 8p 8p 8p 6s 6s 6s 8m 8m 8m 4s 4s",
+      [],
+      [], // TODO
+      { winTile: "4s" },
+    );
+  });
+
+  // 清一色: all one suit
+  it("清一色", () => {
+    expectScore(
+      "1p 2p 3p 4p 5p 6p 7p 8p 9p 1p 2p 3p 5p 5p",
+      [],
+      [], // TODO
+      { winTile: "5p" },
+    );
+  });
+
+  // 一色三同顺: 3 identical chows
+  it("一色三同顺", () => {
+    expectScore(
+      "2p 3p 4p 2p 3p 4p 2p 3p 4p 6m 7m 8m 9s 9s",
+      [],
+      [], // TODO
+      { winTile: "9s" },
+    );
+  });
+
+  // 一色三节高: 3 consecutive pungs
+  it("一色三节高", () => {
+    expectScore(
+      "5s 5s 5s 6s 6s 6s 7s 7s 7s 7s 8s 9s Z Z",
+      [],
+      [], // TODO
+      { winTile: "Z" },
+    );
+  });
+
+  // 全大: all 7/8/9 tiles
+  it("全大", () => {
+    expectScore(
+      "7m 8m 9m 7p 8p 9p 7s 8s 9s 7m 8m 9m 9p 9p",
+      [],
+      [], // TODO
+      { winTile: "9p" },
+    );
+  });
+
+  // 全中: all 4/5/6 tiles
+  it("全中", () => {
+    expectScore(
+      "4p 4p 4p 5s 5s 5s 6m 6m 6m 4s 4s 4s 6p 6p",
+      [],
+      [], // TODO
+      { winTile: "6p" },
+    );
+  });
+
+  // 全小: all 1/2/3 tiles
+  it("全小", () => {
+    expectScore(
+      "1m 2m 3m 1p 2p 3p 1s 2s 3s 1m 2m 3m 2s 2s",
+      [],
+      [], // TODO
+      { winTile: "2s" },
+    );
+  });
+});
+
+// ===========================================================================
+// 16 番
+// ===========================================================================
+
+describe("16 fan", () => {
+
+  // 清龙: 1-9 straight in one suit
+  it("清龙", () => {
+    expectScore(
+      "1m 2m 3m 4m 5m 6m 7m 8m 9m 1s 2s 3s 8s 8s",
+      [],
+      [], // TODO
+      { winTile: "8s" },
+    );
+  });
+
+  // 三色双龙会: 2 suits 123+789, third suit 55 pair
+  it("三色双龙会", () => {
+    expectScore(
+      "1m 2m 3m 7m 8m 9m 1s 2s 3s 7s 8s 9s 5p 5p",
+      [],
+      [], // TODO
+      { winTile: "5p" },
+    );
+  });
+
+  // 一色三步高 (+1): 3 chows stepping +1
+  it("一色三步高 (+1)", () => {
+    expectScore(
+      "3p 4p 5p 4p 5p 6p 5p 6p 7p 2m 3m 4m 9s 9s",
+      [],
+      [], // TODO
+      { winTile: "9s" },
+    );
+  });
+
+  // 一色三步高 (+2): 3 chows stepping +2
+  it("一色三步高 (+2)", () => {
+    expectScore(
+      "1s 2s 3s 3s 4s 5s 5s 6s 7s 2m 3m 4m 9p 9p",
+      [],
+      [], // TODO
+      { winTile: "9p" },
+    );
+  });
+
+  // 全带五: every meld and pair contains a 5
+  it("全带五", () => {
+    expectScore(
+      "4m 5m 6m 4p 5p 6p 3s 4s 5s 5s 6s 7s 5m 5m",
+      [],
+      [], // TODO
+      { winTile: "5m" },
+    );
+  });
+
+  // 三同刻: same-number pungs in 3 suits
+  it("三同刻", () => {
+    expectScore(
+      "4m 4m 4m 4p 4p 4p 4s 4s 4s 6s 6s 6s 6m 6m",
+      [],
+      [], // TODO
+      { winTile: "6m" },
+    );
+  });
+
+  // 三暗刻: 3 concealed pungs (self-draw to avoid discard exclusion)
+  it("三暗刻", () => {
+    expectScore(
+      "1m 1m 1m 5p 5p 5p 9s 9s 9s 3m 4m 5m 7p 7p",
+      [],
+      [], // TODO
+      { winTile: "7p" },
+    );
+  });
+});
+
+// ===========================================================================
+// 12 番
+// ===========================================================================
+
+describe("12 fan", () => {
+
+  // 全不靠: all unrelated (knitted suited + honors)
+  it("全不靠", () => {
+    expectScore(
+      "1m 4m 7m 2p 5p 8p 3s 6s 9s E S W N Z",
+      [],
+      [], // TODO
+      { winTile: "Z" },
+    );
+  });
+
+  // 组合龙: knitted 147/258/369 across suits + 1 meld + pair
+  it("组合龙", () => {
+    expectScore(
+      "1m 4m 7m 2s 5s 8s 3p 6p 9p 6m 7m 8m 9s 9s",
+      [],
+      [], // TODO
+      { winTile: "9s" },
+    );
+  });
+
+  // 大于五: all tiles 6-9
+  it("大于五", () => {
+    expectScore(
+      "6m 7m 8m 6p 7p 8p 6s 7s 8s 6m 7m 8m 9p 9p",
+      [],
+      [], // TODO
+      { winTile: "9p" },
+    );
+  });
+
+  // 小于五: all tiles 1-4
+  it("小于五", () => {
+    expectScore(
+      "1m 2m 3m 1p 2p 3p 1s 2s 3s 2m 3m 4m 4p 4p",
+      [],
+      [], // TODO
+      { winTile: "4p" },
+    );
+  });
+
+  // 三风刻: 3 wind pungs
+  it("三风刻", () => {
+    expectScore(
+      "E E E S S S W W W F F F B B",
+      [],
+      [], // TODO
+      { winTile: "B" },
+    );
+  });
+});
+
+// ===========================================================================
+// 8 番
+// ===========================================================================
+
+describe("8 fan", () => {
+
+  // 花龙: 3 suits forming 1-9
+  it("花龙", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 7s 8s 9s 1p 2p 3p Z Z",
+      [],
+      [], // TODO
+      { winTile: "3p" },
+    );
+  });
+
+  // 推不倒: symmetric tiles only (1/2/3/4/5/8/9p, 2/4/5/6/8/9s, B)
+  it("推不倒", () => {
+    expectScore(
+      "3p 4p 5p 9p 9p 9p 4s 5s 6s 9s 9s 9s 3p 3p",
+      [],
+      [], // TODO
+      { winTile: "3p" },
+    );
+  });
+
+  // 三色三同顺: same-number chows in 3 suits
+  it("三色三同顺", () => {
+    expectScore(
+      "1m 2m 3m 1p 2p 3p 1s 2s 3s 4m 5m 6m 7m 7m",
+      [],
+      [], // TODO
+      { winTile: "7m" },
+    );
+  });
+
+  // 三色三节高: consecutive pungs across 3 suits
+  it("三色三节高", () => {
+    expectScore(
+      "7m 7m 7m 8p 8p 8p 9s 9s 9s 2m 3m 4m 5p 5p",
+      [],
+      [], // TODO
+      { winTile: "5p" },
+    );
+  });
+
+  // 无番和: no other fans (needs exposed melds, mixed suits, honor pair, discard win)
+  it("无番和", () => {
+    expectScore(
+      "4p 5p 6p B B",
+      ["!c(3m 4m 5m)", "!p(2p 2p 2p)", "!c(6s 7s 8s)"],
+      [], // TODO
+      { winTile: "6p", winSource: "discard" },
+    );
+  });
+
+  // 妙手回春: self-draw the very last wall tile (wallCount=0)
+  it("妙手回春", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 7s 8s 9s 2p 3p 4p E E",
+      [],
+      [], // TODO
+      { winTile: "4p", wallCount: 0 },
+    );
+  });
+
+  // 海底捞月: self-draw with isLastTile
+  it("海底捞月", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 7s 8s 9s 2p 3p 4p E E",
+      [],
+      [], // TODO
+      { winTile: "4p", isLastTile: true },
+    );
+  });
+
+  // 杠上开花: win by drawing after a kong
+  it("杠上开花", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 7p 7p",
+      ["!k(9s 9s 9s 9s)", "!p(E E E)"],
+      [], // TODO
+      { winTile: "6p", winSource: "kongDraw" },
+    );
+  });
+
+  // 抢杠和: robbing another player's kong
+  it("抢杠和", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 7p 7p",
+      ["!c(7s 8s 9s)", "!p(E E E)"],
+      [], // TODO
+      { winTile: "6p", winSource: "robbingKong" },
+    );
+  });
+});
+
+// ===========================================================================
+// 6 番
+// ===========================================================================
+
+describe("6 fan", () => {
+
+  // 碰碰和: all 4 melds are pungs
+  it("碰碰和", () => {
+    expectScore(
+      "3m 3m 3m 6p 6p 6p 9s 9s 9s E E",
+      ["!p(8m 8m 8m)"],
+      [], // TODO
+      { winTile: "E", winSource: "discard" },
+    );
+  });
+
+  // 混一色: one suit + honors
+  it("混一色", () => {
+    expectScore(
+      "1m 2m 3m 5m 5m 5m 7m 8m 9m Z Z Z E E",
+      [],
+      [], // TODO
+      { winTile: "E" },
+    );
+  });
+
+  // 三色三步高: 3 suits, chows stepping +1 each
+  it("三色三步高", () => {
+    expectScore(
+      "3m 4m 5m 4p 5p 6p 5s 6s 7s 5m 5m 5m 5p 5p",
+      [],
+      [], // TODO
+      { winTile: "5p" },
+    );
+  });
+
+  // 五门齐: all 5 types present (万 筒 条 风 箭)
+  it("五门齐", () => {
+    expectScore(
+      "1m 2m 3m 1p 2p 3p 7s 8s 9s F F F N N",
+      [],
+      [], // TODO
+      { winTile: "N" },
+    );
+  });
+
+  // 全求人: all 4 melds exposed, win by discard on pair
+  it("全求人", () => {
+    expectScore(
+      "5p 5p",
+      ["!c(1m 2m 3m)", "!p(9s 9s 9s)", "!c(4p 5p 6p)", "!c(7s 8s 9s)"],
+      [], // TODO
+      { winTile: "5p", winSource: "discard" },
+    );
+  });
+
+  // 双暗杠: 2 concealed kongs
+  it("双暗杠", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 9s 9s",
+      ["k(7m 7m 7m 7m)", "k(3s 3s 3s 3s)"],
+      [], // TODO
+      { winTile: "9s" },
+    );
+  });
+
+  // 双箭刻: 2 dragon pungs
+  it("双箭刻", () => {
+    expectScore(
+      "Z Z Z F F F 1m 2m 3m 4p 5p 6p 9s 9s",
+      [],
+      [], // TODO
+      { winTile: "9s" },
+    );
+  });
+});
+
+// ===========================================================================
+// 4 番
+// ===========================================================================
+
+describe("4 fan", () => {
+
+  // 全带幺九: every meld/pair has terminal or honor
+  it("全带幺九", () => {
+    expectScore(
+      "1m 2m 3m 7p 8p 9p 7s 8s 9s E E E 1p 1p",
+      [],
+      [], // TODO
+      { winTile: "1p" },
+    );
+  });
+
+  // 不求人: all concealed + self-draw
+  it("不求人", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 7s 8s 9s 2m 3m 4m 8s 8s",
+      [],
+      [], // TODO
+      { winTile: "8s" },
+    );
+  });
+
+  // 双明杠: 2 exposed kongs
+  it("双明杠", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 9s 9s",
+      ["!k(7m 7m 7m 7m)", "!k(3s 3s 3s 3s)"],
+      [], // TODO
+      { winTile: "9s" },
+    );
+  });
+
+  // 和绝张: win tile is 4th copy (3 already visible)
+  it("和绝张", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 7s 8s 9s 2p 3p 4p E E",
+      [],
+      [], // TODO
+      { winTile: "4p", winTileVisibleCount: 3 },
+    );
+  });
+});
+
+// ===========================================================================
+// 2 番
+// ===========================================================================
+
+describe("2 fan", () => {
+
+  // 箭刻: dragon pung
+  it("箭刻", () => {
+    expectScore(
+      "Z Z Z 1m 2m 3m 4p 5p 6p 7s 8s 9s 1p 1p",
+      [],
+      [], // TODO
+      { winTile: "1p" },
+    );
+  });
+
+  // 圈风刻: pung of round wind (east round, east pung)
+  it("圈风刻", () => {
+    expectScore(
+      "E E E 1m 2m 3m 4p 5p 6p 7s 8s 9s 1p 1p",
+      [],
+      [], // TODO
+      { winTile: "1p", seatWind: "south", roundWind: "east" },
+    );
+  });
+
+  // 门风刻: pung of seat wind (south seat, south pung)
+  it("门风刻", () => {
+    expectScore(
+      "S S S 1m 2m 3m 4p 5p 6p 7s 8s 9s 1p 1p",
+      [],
+      [], // TODO
+      { winTile: "1p", seatWind: "south", roundWind: "east" },
+    );
+  });
+
+  // 门前清: all concealed, win by discard
+  it("门前清", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 7s 8s 9s 2p 3p 4p 8s 8s",
+      [],
+      [], // TODO
+      { winTile: "8s", winSource: "discard" },
+    );
+  });
+
+  // 平和: all chows + suited pair
+  it("平和", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 7s 8s 9s 2m 3m 4m 8s 8s",
+      [],
+      [], // TODO
+      { winTile: "8s" },
+    );
+  });
+
+  // 四归一: 4 of same tile used across melds (not a kong)
+  it("四归一", () => {
+    expectScore(
+      "1p 2p 3p 2p 3p 4p 3p 4p 5p 3p 4p 5p 9s 9s",
+      [],
+      [], // TODO
+      { winTile: "9s" },
+    );
+  });
+
+  // 双同刻: same-number pungs in 2 suits
+  it("双同刻", () => {
+    expectScore(
+      "5m 5m 5m 5p 5p 5p 1s 2s 3s 7m 8m 9m E E",
+      [],
+      [], // TODO
+      { winTile: "E" },
+    );
+  });
+
+  // 双暗刻: 2 concealed pungs
+  it("双暗刻", () => {
+    expectScore(
+      "5m 5m 5m 9p 9p 9p 1s 2s 3s 7m 8m 9m E E",
+      [],
+      [], // TODO
+      { winTile: "E" },
+    );
+  });
+
+  // 暗杠: 1 concealed kong
+  it("暗杠", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 7s 8s 9s 9s 9s",
+      ["k(E E E E)"],
+      [], // TODO
+      { winTile: "9s" },
+    );
+  });
+
+  // 断幺九: no terminals or honors
+  it("断幺九", () => {
+    expectScore(
+      "2m 3m 4m 5p 6p 7p 3s 4s 5s 6s 7s 8s 5m 5m",
+      [],
+      [], // TODO
+      { winTile: "5m" },
+    );
+  });
+});
+
+// ===========================================================================
+// 1 番
+// ===========================================================================
+
+describe("1 fan", () => {
+
+  // 一般高: 2 identical chows in same suit
+  it("一般高", () => {
+    expectScore(
+      "2m 3m 4m 2m 3m 4m 5p 6p 7p 7s 8s 9s E E",
+      [],
+      [], // TODO
+      { winTile: "E" },
+    );
+  });
+
+  // 喜相逢: same-sequence chows in different suits
+  it("喜相逢", () => {
+    expectScore(
+      "2m 3m 4m 2p 3p 4p 5s 6s 7s 7m 8m 9m E E",
+      [],
+      [], // TODO
+      { winTile: "E" },
+    );
+  });
+
+  // 连六: 6 consecutive tiles in one suit
+  it("连六", () => {
+    expectScore(
+      "1m 2m 3m 4m 5m 6m 5p 6p 7p 7s 8s 9s E E",
+      [],
+      [], // TODO
+      { winTile: "E" },
+    );
+  });
+
+  // 老少副: 123 + 789 in same suit
+  it("老少副", () => {
+    expectScore(
+      "1m 2m 3m 7m 8m 9m 4p 5p 6p 7s 8s 9s E E",
+      [],
+      [], // TODO
+      { winTile: "E" },
+    );
+  });
+
+  // 幺九刻: terminal pung (1 or 9)
+  it("幺九刻", () => {
+    expectScore(
+      "1m 1m 1m 4p 5p 6p 7s 8s 9s 2m 3m 4m 8s 8s",
+      [],
+      [], // TODO
+      { winTile: "8s" },
+    );
+  });
+
+  // 明杠: 1 exposed kong
+  it("明杠", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 7s 8s 9s 9s 9s",
+      ["!k(E E E E)"],
+      [], // TODO
+      { winTile: "9s" },
+    );
+  });
+
+  // 缺一门: missing one suit (has honors + 2 suits)
+  it("缺一门", () => {
+    expectScore(
+      "1m 2m 3m 4m 5m 6m 7s 8s 9s E E E 1s 1s",
+      [],
+      [], // TODO
+      { winTile: "1s" },
+    );
+  });
+
+  // 无字: no honor tiles
+  it("无字", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 7s 8s 9s 2m 3m 4m 8s 8s",
+      [],
+      [], // TODO
+      { winTile: "8s" },
+    );
+  });
+
+  // 边张: edge wait (12 waiting for 3, or 89 waiting for 7)
+  it("边张", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 7s 8s 9s 2p 3p 4p Z Z",
+      [],
+      [], // TODO
+      { winTile: "3m" },
+    );
+  });
+
+  // 坎张: middle wait (e.g. 46 waiting for 5)
+  it("坎张", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 7s 8s 9s 4m 5m 6m Z Z",
+      [],
+      [], // TODO
+      { winTile: "5m" },
+    );
+  });
+
+  // 单钓将: single wait on pair tile
+  it("单钓将", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 7s 8s 9s 2m 3m 4m Z Z",
+      [],
+      [], // TODO
+      { winTile: "Z" },
+    );
+  });
+
+  // 自摸: self-draw win (no other special conditions)
+  it("自摸", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 7s 8s 9s 2p 3p 4p E E",
+      [],
+      [], // TODO
+      { winTile: "4p" },
+    );
+  });
+
+  // 花牌: bonus tiles
+  it("花牌", () => {
+    expectScore(
+      "1m 2m 3m 4p 5p 6p 7s 8s 9s 2p 3p 4p E E",
+      [],
+      [], // TODO
+      { winTile: "4p", bonusTileCount: 2 },
+    );
+  });
 });

@@ -15,6 +15,7 @@ function allIndices(hand: WinningHand): number[] {
   }
   if (hand.pair >= 0) indices.push(hand.pair);
   if (hand.sevenPairs) indices.push(...hand.sevenPairs);
+  if (hand.thirteenOrphansIndices) indices.push(...hand.thirteenOrphansIndices);
   return indices;
 }
 
@@ -43,7 +44,7 @@ export function quanDaiYaoJiu(hand: WinningHand): FanMatch[] {
 
 /** 混幺九 (32): all tiles are terminals or honors, all pungs/kongs */
 export function hunYaoJiu(hand: WinningHand): FanMatch[] {
-  if (hand.form !== "standard") return [];
+  if (hand.form !== "standard" && hand.form !== "sevenPairs") return [];
   const all = allIndices(hand);
   if (!all.every(isTerminalOrHonor)) return [];
   // Must have both suited terminals and honors
@@ -53,7 +54,7 @@ export function hunYaoJiu(hand: WinningHand): FanMatch[] {
 
 /** 清幺九 (64): all tiles are terminals (1 or 9 of suited), no honors */
 export function qingYaoJiu(hand: WinningHand): FanMatch[] {
-  if (hand.form !== "standard") return [];
+  if (hand.form !== "standard" && hand.form !== "sevenPairs") return [];
   const all = allIndices(hand);
   if (!all.every(isTerminal)) return [];
   return [fm("清幺九", 64)];
@@ -108,7 +109,7 @@ export function xiaoYuWu(hand: WinningHand): FanMatch[] {
   return [];
 }
 
-/** 幺九刻 (1): each pung/kong of a terminal or honor. Returns one per qualifying meld. */
+/** 幺九刻 (1): each pung/kong of a terminal. Returns one per qualifying meld. */
 export function yaoJiuKe(hand: WinningHand): FanMatch[] {
   const results: FanMatch[] = [];
   for (let i = 0; i < hand.allMelds.length; i++) {

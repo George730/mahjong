@@ -10,7 +10,20 @@ function fm(fan: string, score: number): FanMatch {
 /** 四归一 (2): 4 tiles of the same face used across different melds (not a kong).
  *  Can occur multiple times for different faces. */
 export function siGuiYi(hand: WinningHand): FanMatch[] {
-  if (hand.form === "sevenPairs" || hand.form === "thirteenOrphans") return [];
+  if (hand.form === "thirteenOrphans") return [];
+
+  if (hand.form === "sevenPairs" && hand.sevenPairs) {
+    // In seven pairs, a tile appearing twice in the pairs array means 4 copies
+    const counts = new Map<number, number>();
+    for (const idx of hand.sevenPairs) {
+      counts.set(idx, (counts.get(idx) ?? 0) + 1);
+    }
+    const results: FanMatch[] = [];
+    for (const [, count] of counts) {
+      if (count >= 2) results.push(fm("四归一", 2));
+    }
+    return results;
+  }
 
   // Count occurrences of each tile index across all melds + pair
   const counts = new Array(34).fill(0);
@@ -94,7 +107,8 @@ export function qiXingBuKao(hand: WinningHand): FanMatch[] {
   return [];
 }
 
-/** 九莲宝灯 (88): one suit, pattern 1112345678999 + any same-suit tile */
+/** 九莲宝灯 (88): the 13-tile hand before winning must be exactly 1112345678999
+ *  (one suit), then win on any tile of the same suit. */
 export function jiuLianBaoDeng(hand: WinningHand): FanMatch[] {
   if (hand.form !== "standard") return [];
   // All tiles must be same suit
@@ -106,21 +120,17 @@ export function jiuLianBaoDeng(hand: WinningHand): FanMatch[] {
   const suit = suitOf(allIndices[0]);
   if (!allIndices.every(i => suitOf(i) === suit)) return [];
 
-  // Count by rank
+  // Count by rank, then subtract the win tile to get the 13-tile hand before winning
   const rankCounts = new Array(10).fill(0);
   for (const idx of allIndices) rankCounts[rankOf(idx)]++;
+  rankCounts[rankOf(hand.winTile)]--;
 
-  // Base pattern: 1112345678999 (14 tiles)
-  // rank 1: 3+, rank 9: 3+, ranks 2-8: 1+ each, total = 14
-  // The "extra" tile (the 14th completing tile) makes one rank have +1
+  // The 13-tile hand must be exactly 1112345678999
   const basePattern = [0, 3, 1, 1, 1, 1, 1, 1, 1, 3]; // index 0 unused
-  let extraCount = 0;
   for (let r = 1; r <= 9; r++) {
-    if (rankCounts[r] < basePattern[r]) return [];
-    extraCount += rankCounts[r] - basePattern[r];
+    if (rankCounts[r] !== basePattern[r]) return [];
   }
-  if (extraCount === 1) return [fm("九莲宝灯", 88)];
-  return [];
+  return [fm("九莲宝灯", 88)];
 }
 
 /** 无番和 (8): no other fan detected (floor of 8). Detected in the scoring pipeline, not here.

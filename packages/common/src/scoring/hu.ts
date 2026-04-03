@@ -51,6 +51,12 @@ export function buildWinningHand(
   if (decomp.form === "sevenPairs") {
     hand.sevenPairs = decomp.pairs;
   }
+  if (decomp.form === "thirteenOrphans") {
+    // Reconstruct all 14 tile indices from allMelds (empty) + pair
+    // Thirteen orphans: one of each orphan tile + one duplicate (the pair)
+    const ORPHAN_INDICES = [0, 8, 9, 17, 18, 26, 27, 28, 29, 30, 31, 32, 33];
+    hand.thirteenOrphansIndices = [...ORPHAN_INDICES, pair];
+  }
 
   return hand;
 }

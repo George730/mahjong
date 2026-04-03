@@ -8,17 +8,24 @@ for (const def of FAN_REGISTRY) {
   REGISTRY_MAP.set(def.id, def);
 }
 
-/** Remove fans that are excluded by higher-scoring fans. */
+/** Remove fans that are excluded by surviving (non-excluded) fans.
+ *  Iterate until stable so that a fan which is itself excluded cannot
+ *  exclude others (exclusion is not transitive). */
 export function applyExclusions(matches: FanMatch[]): FanMatch[] {
-  const detected = new Set(matches.map(m => m.fan));
-  const excluded = new Set<string>();
+  let excluded = new Set<string>();
 
-  for (const m of matches) {
-    const def = REGISTRY_MAP.get(m.fan);
-    if (!def) continue;
-    for (const ex of def.excludes) {
-      if (detected.has(ex)) excluded.add(ex);
+  for (;;) {
+    const next = new Set<string>();
+    for (const m of matches) {
+      if (excluded.has(m.fan)) continue; // this fan is excluded, skip
+      const def = REGISTRY_MAP.get(m.fan);
+      if (!def) continue;
+      for (const ex of def.excludes) {
+        if (matches.some(mm => mm.fan === ex)) next.add(ex);
+      }
     }
+    if (next.size === excluded.size) break;
+    excluded = next;
   }
 
   return matches.filter(m => !excluded.has(m.fan));
@@ -28,33 +35,34 @@ export function applyExclusions(matches: FanMatch[]): FanMatch[] {
  * Cap rules: when a higher fan is present, cap a lower fan to a max count.
  * E.g. 清幺九 always has 双同刻, but official rules only count one (不计两幅双同刻).
  */
-const CAP_RULES: { when: string; cap: string; maxCount: number }[] = [
-  { when: "清幺九", cap: "双同刻", maxCount: 1 },
+const CAP_RULES: { when: string; cap: string; deduct: number }[] = [
+  { when: "清幺九", cap: "双同刻", deduct: 1 },
+  { when: "九莲宝灯", cap: "幺九刻", deduct: 1 },
 ];
 
-/** Apply cap rules: limit certain fan counts when a higher fan is present. */
+/** Apply cap rules: deduct N instances of a lower fan when a higher fan is present. */
 export function applyCapRules(matches: FanMatch[]): FanMatch[] {
   const detected = new Set(matches.map(m => m.fan));
-  const caps = new Map<string, number>();
+  const deductions = new Map<string, number>();
 
   for (const rule of CAP_RULES) {
     if (detected.has(rule.when)) {
-      const existing = caps.get(rule.cap);
-      if (existing === undefined || rule.maxCount < existing) {
-        caps.set(rule.cap, rule.maxCount);
-      }
+      deductions.set(rule.cap, (deductions.get(rule.cap) ?? 0) + rule.deduct);
     }
   }
 
-  if (caps.size === 0) return matches;
+  if (deductions.size === 0) return matches;
 
-  const counts = new Map<string, number>();
+  const removed = new Map<string, number>();
   return matches.filter(m => {
-    const max = caps.get(m.fan);
-    if (max === undefined) return true;
-    const seen = (counts.get(m.fan) ?? 0) + 1;
-    counts.set(m.fan, seen);
-    return seen <= max;
+    const toRemove = deductions.get(m.fan);
+    if (toRemove === undefined) return true;
+    const alreadyRemoved = removed.get(m.fan) ?? 0;
+    if (alreadyRemoved < toRemove) {
+      removed.set(m.fan, alreadyRemoved + 1);
+      return false;
+    }
+    return true;
   });
 }
 
@@ -83,20 +91,25 @@ export function deduplicateIdenticalFans(matches: FanMatch[]): FanMatch[] {
 /**
  * 套算一次原则: 如有尚未组合过的一副牌，只可同已组合过的相应的一副牌套算一次。
  *
- * Process combination fans in descending score order. When a fan is selected,
- * ALL its involved melds become "established." A subsequent fan is only valid
- * if at least one of its melds is NOT yet established (introduces a fresh meld).
+ * Process combination fans in descending score order. A fresh meld (not yet
+ * established) can be combined with already-established melds only once.
+ * However, a fan that uses only already-established melds is always allowed
+ * — different fans on the same melds are not restricted.
  *
  * Whole-hand fans (involvedMelds covering all 4 melds, or no specific melds)
- * evaluate the overall hand pattern and are exempt from this constraint.
+ * and single-meld fans are exempt from this constraint.
  */
 export function applyOnlyOnce(matches: FanMatch[]): FanMatch[] {
   const exempt: FanMatch[] = [];
   const combination: FanMatch[] = [];
 
   for (const m of matches) {
-    // Whole-hand fans (all 4 melds or no specific melds) are exempt
-    if (m.involvedMelds.length === 0 || m.involvedMelds.length >= 4) {
+    // Whole-hand fans (all 4 melds or no specific melds) are exempt.
+    // Single-meld fans (e.g. 幺九刻, 箭刻, 明杠, 暗杠) describe intrinsic
+    // properties of one meld, not inter-meld combinations, so they are also exempt.
+    if (m.involvedMelds.length <= 1 && !m.involvedPair
+        || m.involvedMelds.length === 0
+        || m.involvedMelds.length >= 4) {
       exempt.push(m);
     } else {
       combination.push(m);
@@ -106,14 +119,28 @@ export function applyOnlyOnce(matches: FanMatch[]): FanMatch[] {
   // Sort by score descending — higher fans are established first
   combination.sort((a, b) => b.score - a.score);
 
-  // Greedily accept fans that introduce at least one fresh meld
-  let established = 0;
+  let established = 0;   // melds used in any accepted fan
+  let combined = 0;       // fresh melds that have already been 套算'd with established melds
   const selected: FanMatch[] = [];
   for (const m of combination) {
     const mask = toMeldMask(m);
-    if ((mask & ~established) === 0) continue; // all melds already established
-    established |= mask;
-    selected.push(m);
+    const fresh = mask & ~established;
+
+    if (fresh === 0) {
+      // All melds already established — a different fan on the same melds is allowed
+      selected.push(m);
+    } else if ((fresh & combined) !== 0) {
+      // This fresh meld was already used in a previous 套算 — reject
+      continue;
+    } else {
+      // Fresh meld(s) being introduced
+      if ((mask & established) !== 0) {
+        // Mixed fresh + established: this is a 套算, mark fresh melds as used
+        combined |= fresh;
+      }
+      established |= mask;
+      selected.push(m);
+    }
   }
 
   return [...exempt, ...selected];

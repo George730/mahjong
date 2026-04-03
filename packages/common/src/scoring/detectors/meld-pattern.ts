@@ -62,12 +62,10 @@ export function shuangAnKe(hand: WinningHand): FanMatch[] {
   return [];
 }
 
-/** 门前清 (2): no exposed melds (all concealed), win by discard */
+/** 门前清 (2): no exposed melds (all concealed) */
 export function menQianQing(hand: WinningHand): FanMatch[] {
-  if (hand.context.winSource === "discard" || hand.context.winSource === "robbingKong") {
-    if (hand.allMelds.every(m => m.concealed))
-      return [m("门前清", 2, [])];
-  }
+  if (hand.allMelds.every(m => m.concealed))
+    return [m("门前清", 2, [])];
   return [];
 }
 
@@ -84,7 +82,7 @@ export function buQiuRen(hand: WinningHand): FanMatch[] {
 /** 全求人 (6): all melds exposed, win by discard (单钓将) */
 export function quanQiuRen(hand: WinningHand): FanMatch[] {
   if (hand.context.winSource !== "discard") return [];
-  if (hand.context.declaredMeldCount === 4)
+  if (hand.allMelds.length === 4 && hand.allMelds.every(m => !m.concealed))
     return [m("全求人", 6)];
   return [];
 }
