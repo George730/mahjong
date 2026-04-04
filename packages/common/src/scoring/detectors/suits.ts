@@ -24,6 +24,7 @@ function getSuitProfile(hand: WinningHand) {
   if (hand.pair >= 0) check(hand.pair);
   if (hand.sevenPairs) hand.sevenPairs.forEach(check);
   if (hand.thirteenOrphansIndices) hand.thirteenOrphansIndices.forEach(check);
+  if (hand.allUnrelated) hand.allUnrelated.forEach(check);
 
   return { suits, hasWinds, hasDragons, hasHonors: hasWinds || hasDragons };
 }
@@ -83,6 +84,8 @@ export function lvYiSe(hand: WinningHand): FanMatch[] {
     if (!m.tileIndices.every(check)) return [];
   }
   if (hand.pair >= 0 && !check(hand.pair)) return [];
+  if (hand.sevenPairs && !hand.sevenPairs.every(check)) return [];
+  if (hand.allUnrelated && !hand.allUnrelated.every(check)) return [];
   return [fm("绿一色", 88)];
 }
 
@@ -102,5 +105,7 @@ export function tuiBuDao(hand: WinningHand): FanMatch[] {
     if (!m.tileIndices.every(check)) return [];
   }
   if (hand.pair >= 0 && !check(hand.pair)) return [];
+  if (hand.sevenPairs && !hand.sevenPairs.every(check)) return [];
+  if (hand.allUnrelated && !hand.allUnrelated.every(check)) return [];
   return [fm("推不倒", 8)];
 }

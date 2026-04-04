@@ -274,6 +274,12 @@ function isSuitedPairRank5(pairIdx: number): boolean {
 
 /** 平和 (2): all chows, no honors, non-wait-pattern (pair is not wind/dragon) */
 export function pingHu(hand: WinningHand): FanMatch[] {
+  if (hand.form === "knitted") {
+    // Knitted tiles act as 3 virtual chows; check remaining meld is chow + suited pair
+    if (!hand.allMelds.every(m => m.type === "chow")) return [];
+    if (hand.pair >= 27) return [];
+    return [fm("平和", 2, [0, 1, 2, 3])];
+  }
   if (hand.form !== "standard") return [];
   if (hand.allMelds.length !== 4) return [];
   if (!hand.allMelds.every(m => m.type === "chow")) return [];

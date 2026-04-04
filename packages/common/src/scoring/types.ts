@@ -21,8 +21,9 @@ export type HandForm =
   | { form: "standard"; closedMelds: ParsedMeld[]; pair: number }
   | { form: "sevenPairs"; pairs: number[] }
   | { form: "thirteenOrphans"; pair: number }
-  | { form: "knitted"; closedMelds: ParsedMeld[]; pair: number; knittedIndices: number[] }
-  | { form: "allUnrelated"; indices: number[] };
+  | { form: "knitted"; knittedIndices: number[]; closedMelds: ParsedMeld[]; pair: number }
+  | { form: "allUnrelated"; indices: number[] }
+  | { form: "allHonors"; indices: number[] };
 
 // --- Scoring structures ---
 
@@ -47,7 +48,6 @@ export interface WinContext {
   bonusTileCount: number;
   isKongDraw: boolean;
   isRobbingKong: boolean;
-  isLastTile: boolean;
   declaredMeldCount: number;
   /** For 和绝张: how many of the win tile are visible (discards + melds). */
   winTileVisibleCount: number;
@@ -63,6 +63,7 @@ export interface WinningHand {
   sevenPairs?: number[];
   /** For thirteen orphans: all 13+1 indices. */
   thirteenOrphansIndices?: number[];
+  allUnrelated?: number[];
 }
 
 // --- Fan detection ---

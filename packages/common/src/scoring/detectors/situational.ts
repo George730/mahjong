@@ -28,18 +28,16 @@ export function miaoShouHuiChun(hand: WinningHand): FanMatch[] {
   return [];
 }
 
-/** 海底捞月 (8): self-draw when wall is about to be exhausted (last tile) */
+/** 海底捞月 (8): win on the last discard (wall exhausted) */
 export function haiDiLaoYue(hand: WinningHand): FanMatch[] {
-  if (hand.context.winSource === "selfDraw" && hand.context.isLastTile)
+  if (hand.context.winSource === "discard" && hand.context.wallCount === 0)
     return [fm("海底捞月", 8)];
   return [];
 }
 
-/** 河底捞鱼 (8): win on the last discard before wall exhaustion */
+/** 河底捞鱼 — alias kept for compatibility, not used in registry */
 export function heDiLaoYu(hand: WinningHand): FanMatch[] {
-  if (hand.context.winSource === "discard" && hand.context.isLastTile)
-    return [fm("河底捞鱼", 8)];
-  return [];
+  return haiDiLaoYue(hand);
 }
 
 /** 杠上开花 (8): won by drawing a replacement tile after kong */

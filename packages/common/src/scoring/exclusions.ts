@@ -38,6 +38,9 @@ export function applyExclusions(matches: FanMatch[]): FanMatch[] {
 const CAP_RULES: { when: string; cap: string; deduct: number }[] = [
   { when: "清幺九", cap: "双同刻", deduct: 1 },
   { when: "九莲宝灯", cap: "幺九刻", deduct: 1 },
+  { when: "清幺九|七对", cap: "四归一", deduct: 1 },
+  { when: "四暗刻|四杠", cap: "暗杠", deduct: 1 },
+  { when: "推不倒|绿一色|七对", cap: "四归一", deduct: 3}
 ];
 
 /** Apply cap rules: deduct N instances of a lower fan when a higher fan is present. */
@@ -46,7 +49,9 @@ export function applyCapRules(matches: FanMatch[]): FanMatch[] {
   const deductions = new Map<string, number>();
 
   for (const rule of CAP_RULES) {
-    if (detected.has(rule.when)) {
+    // Support compound conditions: "A|B" means both A and B must be present
+    const parts = rule.when.split("|");
+    if (parts.every(p => detected.has(p))) {
       deductions.set(rule.cap, (deductions.get(rule.cap) ?? 0) + rule.deduct);
     }
   }
@@ -67,26 +72,45 @@ export function applyCapRules(matches: FanMatch[]): FanMatch[] {
 }
 
 /** 不得相同原则: 凡已组合过某一番种的牌，不能再同其它一副牌组成相同的番种计分。
- *  If two matches of the same fan involve melds with identical tile-index sets, keep only one. 
- */
+ *  A meld that has already been used to form a certain fan cannot be used again
+ *  with other melds to form the same fan. For each fan type, greedily accept
+ *  instances and mark their melds as used; reject later instances that overlap. */
 export function deduplicateIdenticalFans(matches: FanMatch[]): FanMatch[] {
-  const seen = new Map<string, Set<string>>();
+  // Track which melds (and pair) are used per fan type
+  const usedMelds = new Map<string, Set<number>>();
   const result: FanMatch[] = [];
 
   for (const m of matches) {
-    const key = m.fan;
-    const meldKey = [...m.involvedMelds].sort().join(",") + (m.involvedPair ? "|P" : "");
+    const fanKey = m.fan;
+    if (!usedMelds.has(fanKey)) usedMelds.set(fanKey, new Set());
+    const used = usedMelds.get(fanKey)!;
 
-    if (!seen.has(key)) seen.set(key, new Set());
-    const keys = seen.get(key)!;
-    if (!keys.has(meldKey)) {
-      keys.add(meldKey);
+    // Check if any involved meld is already used for this fan
+    const overlaps = m.involvedMelds.some(idx => used.has(idx))
+      || (m.involvedPair && used.has(-1));
+
+    if (!overlaps) {
+      // Accept this match and mark its melds as used
+      for (const idx of m.involvedMelds) used.add(idx);
+      if (m.involvedPair) used.add(-1);
       result.push(m);
     }
   }
 
   return result;
 }
+
+/**
+ * Meld-counting fans: these count how many melds have an intrinsic property
+ * (concealed, is-kong, etc.) rather than describing inter-meld relationships.
+ * Their involvedMelds lists "which melds have the property", not a combination
+ * pattern, so 套算一次 does not apply to them.
+ */
+const COUNTING_FANS = new Set([
+  "双暗刻", "三暗刻",     // count of concealed pungs
+  "双暗杠", "双明杠",     // count of kongs by exposure
+  "三杠",                 // count of kongs
+]);
 
 /**
  * 套算一次原则: 如有尚未组合过的一副牌，只可同已组合过的相应的一副牌套算一次。
@@ -96,8 +120,10 @@ export function deduplicateIdenticalFans(matches: FanMatch[]): FanMatch[] {
  * However, a fan that uses only already-established melds is always allowed
  * — different fans on the same melds are not restricted.
  *
- * Whole-hand fans (involvedMelds covering all 4 melds, or no specific melds)
- * and single-meld fans are exempt from this constraint.
+ * Exempt from this constraint:
+ * - Whole-hand fans (involvedMelds covering all 4 melds, or no specific melds)
+ * - Single-meld fans (e.g. 幺九刻, 箭刻, 明杠, 暗杠)
+ * - Meld-counting fans (e.g. 双暗刻, 双明杠) that count an intrinsic property
  */
 export function applyOnlyOnce(matches: FanMatch[]): FanMatch[] {
   const exempt: FanMatch[] = [];
@@ -107,9 +133,12 @@ export function applyOnlyOnce(matches: FanMatch[]): FanMatch[] {
     // Whole-hand fans (all 4 melds or no specific melds) are exempt.
     // Single-meld fans (e.g. 幺九刻, 箭刻, 明杠, 暗杠) describe intrinsic
     // properties of one meld, not inter-meld combinations, so they are also exempt.
+    // Meld-counting fans (e.g. 双暗刻) count a property of N individual melds,
+    // not a combinatorial relationship — also exempt.
     if (m.involvedMelds.length <= 1 && !m.involvedPair
         || m.involvedMelds.length === 0
-        || m.involvedMelds.length >= 4) {
+        || m.involvedMelds.length >= 4
+        || COUNTING_FANS.has(m.fan)) {
       exempt.push(m);
     } else {
       combination.push(m);
@@ -124,7 +153,9 @@ export function applyOnlyOnce(matches: FanMatch[]): FanMatch[] {
   const selected: FanMatch[] = [];
   for (const m of combination) {
     const mask = toMeldMask(m);
-    const fresh = mask & ~established;
+    // Melds introduced via 套算 (in `combined`) are not truly established —
+    // treat them as fresh so the `fresh & combined` guard can reject reuse.
+    const fresh = mask & ~(established & ~combined);
 
     if (fresh === 0) {
       // All melds already established — a different fan on the same melds is allowed

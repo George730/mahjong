@@ -207,62 +207,288 @@ const KNITTED_SETS = [
  * Try all 6 suit-to-set assignments for the knitted straight.
  * Returns all valid knitted hand decompositions.
  */
-export function findKnittedDecompositions(counts: number[]): HandForm[] {
+// export function findKnittedDecompositions(counts: number[]): HandForm[] {
+//   const results: HandForm[] = [];
+//   const suitPerms = [
+//     [0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0],
+//   ];
+
+//   for (const perm of suitPerms) {
+//     // Check if the knitted pattern exists
+//     const knittedIndices: number[] = [];
+//     let valid = true;
+
+//     for (let setIdx = 0; setIdx < 3; setIdx++) {
+//       const suit = perm[setIdx];
+//       for (const rank of KNITTED_SETS[setIdx]) {
+//         const idx = suit * 9 + (rank - 1);
+//         if (counts[idx] < 1) { valid = false; break; }
+//         knittedIndices.push(idx);
+//       }
+//       if (!valid) break;
+//     }
+//     if (!valid) continue;
+
+//     // Remove knitted tiles, decompose remaining 5 tiles into 1 meld + 1 pair
+//     const remaining = [...counts];
+//     for (const idx of knittedIndices) remaining[idx]--;
+
+//     // Check for 全不靠: remaining are all distinct honors (no meld, no pair in standard sense)
+//     // 全不靠 has 14 tiles: 9 knitted + 5 distinct honors, but that's only possible if total = 14
+//     const remainCount = remaining.reduce((a, b) => a + b, 0);
+//     if (remainCount === 5) {
+//       // Try to decompose as 1 meld + 1 pair
+//       const decomps = decompose(remaining, 1);
+//       for (const d of decomps) {
+//         results.push({
+//           form: "knitted",
+//           closedMelds: d.closedMelds,
+//           pair: d.pair,
+//           knittedIndices,
+//         });
+//       }
+
+//       // Check 全不靠: all 5 remaining are distinct honors
+//       let allDistinctHonors = true;
+//       for (let i = 0; i < 34; i++) {
+//         if (remaining[i] > 1) { allDistinctHonors = false; break; }
+//         if (remaining[i] === 1 && !isHonor(i)) { allDistinctHonors = false; break; }
+//       }
+//       if (allDistinctHonors && remainCount === 5) {
+//         const indices = [...knittedIndices];
+//         for (let i = 27; i < 34; i++) {
+//           if (remaining[i] === 1) indices.push(i);
+//         }
+//         results.push({ form: "allUnrelated", indices });
+//       }
+//     }
+//   }
+
+//   // 七星不靠: 7 honors (all distinct) + 7 suited tiles following knitted pattern
+//   // Check if all 7 honors are present
+//   let allHonors = true;
+//   for (let i = 27; i < 34; i++) {
+//     if (counts[i] !== 1) { allHonors = false; break; }
+//   }
+//   if (allHonors) {
+//     // Check suited tiles: must total 7, following a knitted pattern
+//     for (const perm of suitPerms) {
+//       const indices: number[] = [];
+//       let valid = true;
+//       let suitedCount = 0;
+
+//       for (let setIdx = 0; setIdx < 3; setIdx++) {
+//         const suit = perm[setIdx];
+//         let suitCount = 0;
+//         for (const rank of KNITTED_SETS[setIdx]) {
+//           const idx = suit * 9 + (rank - 1);
+//           if (counts[idx] === 1) {
+//             indices.push(idx);
+//             suitCount++;
+//           } else if (counts[idx] > 1) {
+//             valid = false; break; // no duplicates allowed
+//           }
+//         }
+//         if (!valid) break;
+//         if (suitCount === 0) { valid = false; break; } // each suit must contribute
+//         suitedCount += suitCount;
+//       }
+//       if (!valid || suitedCount !== 7) continue;
+
+//       // Verify no other suited tiles exist outside the knitted pattern
+//       let extraSuited = false;
+//       const idxSet = new Set(indices);
+//       for (let i = 0; i < 27; i++) {
+//         if (counts[i] > 0 && !idxSet.has(i)) { extraSuited = true; break; }
+//       }
+//       if (extraSuited) continue;
+
+//       // Valid 七星不靠 decomposition
+//       for (let i = 27; i < 34; i++) indices.push(i);
+//       results.push({ form: "allUnrelated", indices });
+//       break; // one valid permutation is enough
+//     }
+//   }
+
+//   return results;
+// }
+/**
+ * Try all 6 suit-to-set assignments for the knitted straight.
+ */
+export function findKnittedDecompositions(counts: number[], declaredMeldCount: number = 0): HandForm[] {
   const results: HandForm[] = [];
   const suitPerms = [
-    [0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0],
+    [0, 1, 2], [0, 2, 1], [1, 0, 2],
+    [1, 2, 0], [2, 0, 1], [2, 1, 0],
   ];
 
-  for (const perm of suitPerms) {
-    // Check if the knitted pattern exists
+  const clone = (arr: number[]) => [...arr];
+
+  const extractKnitted = (counts: number[], perm: number[]) => {
     const knittedIndices: number[] = [];
-    let valid = true;
 
     for (let setIdx = 0; setIdx < 3; setIdx++) {
       const suit = perm[setIdx];
       for (const rank of KNITTED_SETS[setIdx]) {
         const idx = suit * 9 + (rank - 1);
-        if (counts[idx] < 1) { valid = false; break; }
+        if (counts[idx] < 1) return null;
         knittedIndices.push(idx);
       }
-      if (!valid) break;
     }
-    if (!valid) continue;
+    return knittedIndices;
+  };
 
-    // Remove knitted tiles, decompose remaining 5 tiles into 1 meld + 1 pair
-    const remaining = [...counts];
-    for (const idx of knittedIndices) remaining[idx]--;
+  /**
+   * =========================================================
+   * 1. 七星不靠 (PRIORITY 1 - MUST CHECK FIRST, no declared melds)
+   * =========================================================
+   */
+  const checkSevenStars = () => {
+    if (declaredMeldCount > 0) return;
+    let allHonors = true;
+    for (let i = 27; i < 34; i++) {
+      if (counts[i] !== 1) {
+        allHonors = false;
+        break;
+      }
+    }
+    if (!allHonors) return;
 
-    // Check for 全不靠: remaining are all distinct honors (no meld, no pair in standard sense)
-    // 全不靠 has 14 tiles: 9 knitted + 5 distinct honors, but that's only possible if total = 14
-    const remainCount = remaining.reduce((a, b) => a + b, 0);
-    if (remainCount === 5) {
-      // Try to decompose as 1 meld + 1 pair
-      const decomps = decompose(remaining, 1);
+    for (const perm of suitPerms) {
+      const indices: number[] = [];
+      let valid = true;
+      let suitedCount = 0;
+
+      for (let setIdx = 0; setIdx < 3; setIdx++) {
+        const suit = perm[setIdx];
+        let suitCount = 0;
+
+        for (const rank of KNITTED_SETS[setIdx]) {
+          const idx = suit * 9 + (rank - 1);
+
+          if (counts[idx] > 1) {
+            valid = false;
+            break;
+          }
+
+          if (counts[idx] === 1) {
+            indices.push(idx);
+            suitCount++;
+          }
+        }
+
+        if (!valid || suitCount === 0) { valid = false; break; }
+        suitedCount += suitCount;
+      }
+
+      if (!valid || suitedCount !== 7) continue;
+
+      // no extra suited tiles allowed
+      for (let i = 0; i < 27; i++) {
+        if (counts[i] > 0 && !indices.includes(i)) {
+          valid = false;
+          break;
+        }
+      }
+
+      if (!valid) continue;
+
+      for (let i = 27; i < 34; i++) indices.push(i);
+
+      results.push({
+        form: "allHonors",
+        indices,
+      });
+
+      return; // priority rule: stop immediately
+    }
+  };
+
+  /**
+   * =========================================================
+   * 2. 组合龙: 9 knitted + 1 meld + 1 pair from remaining 5 tiles
+   * =========================================================
+   */
+  const checkCombinationDragon = () => {
+    for (const perm of suitPerms) {
+      const knitted = extractKnitted(counts, perm);
+      if (!knitted) continue;
+
+      const remaining = clone(counts);
+      for (const idx of knitted) remaining[idx]--;
+
+      // Remaining tiles decompose into (1 - declaredMeldCount) melds + pair
+      const neededMelds = Math.max(0, 1 - declaredMeldCount);
+      const decomps = decompose(remaining, neededMelds);
       for (const d of decomps) {
         results.push({
           form: "knitted",
+          knittedIndices: knitted,
           closedMelds: d.closedMelds,
           pair: d.pair,
-          knittedIndices,
         });
       }
-
-      // Check 全不靠: all 5 remaining are distinct honors
-      let allDistinctHonors = true;
-      for (let i = 0; i < 34; i++) {
-        if (remaining[i] > 1) { allDistinctHonors = false; break; }
-        if (remaining[i] === 1 && !isHonor(i)) { allDistinctHonors = false; break; }
-      }
-      if (allDistinctHonors && remainCount === 5) {
-        const indices = [...knittedIndices];
-        for (let i = 27; i < 34; i++) {
-          if (remaining[i] === 1) indices.push(i);
-        }
-        results.push({ form: "allUnrelated", indices });
-      }
+      if (decomps.length > 0) return;
     }
-  }
+  };
+
+  /**
+   * =========================================================
+   * 3. 全不靠: 8-9 suited tiles from knitted pattern + distinct honors
+   *    (7+7 is 七星不靠, already handled above)
+   * =========================================================
+   */
+  const checkAllUnrelated = () => {
+    if (declaredMeldCount > 0) return;
+    // All tiles must be singletons
+    for (let i = 0; i < 34; i++) {
+      if (counts[i] > 1) return;
+    }
+
+    // Collect suited and honor tiles
+    const suitedTiles: number[] = [];
+    const honorTiles: number[] = [];
+    for (let i = 0; i < 27; i++) {
+      if (counts[i] === 1) suitedTiles.push(i);
+    }
+    for (let i = 27; i < 34; i++) {
+      if (counts[i] === 1) honorTiles.push(i);
+    }
+
+    // 全不靠: 8-9 suited + 5-6 honors = 14
+    if (suitedTiles.length < 8 || suitedTiles.length > 9) return;
+    if (suitedTiles.length + honorTiles.length !== 14) return;
+
+    // Check suited tiles follow a knitted pattern permutation
+    for (const perm of suitPerms) {
+      let valid = true;
+      for (const idx of suitedTiles) {
+        const suit = suitOf(idx);
+        const rank = rankOf(idx);
+        const setIdx = perm.indexOf(suit);
+        if (setIdx === -1 || !KNITTED_SETS[setIdx].includes(rank)) {
+          valid = false;
+          break;
+        }
+      }
+      if (!valid) continue;
+
+      // Each suit must contribute at least 1 tile
+      const suitsUsed = new Set(suitedTiles.map(i => suitOf(i)));
+      if (suitsUsed.size !== 3) continue;
+
+      const indices = [...suitedTiles, ...honorTiles];
+      results.push({ form: "allUnrelated", indices });
+      return;
+    }
+  };
+
+  // =========================
+  // EXECUTION ORDER (IMPORTANT)
+  // =========================
+  checkSevenStars();
+  checkCombinationDragon();
+  checkAllUnrelated();
 
   return results;
 }
@@ -278,11 +504,16 @@ export function findAllDecompositions(counts: number[], declaredMeldCount: numbe
     results.push({ form: "standard", closedMelds: d.closedMelds, pair: d.pair });
   }
 
-  // Special forms: only when no declared melds (full 14-tile hand)
+  // Seven pairs & thirteen orphans: only when no declared melds
   if (declaredMeldCount === 0) {
     if (isSevenPairs(counts)) results.push(buildSevenPairs(counts));
     if (isThirteenOrphans(counts)) results.push(buildThirteenOrphans(counts));
-    const knitted = findKnittedDecompositions(counts);
+  }
+
+  // Knitted decompositions: 组合龙 can work with ≤1 declared melds;
+  // 全不靠/七星不靠 require no declared melds
+  if (declaredMeldCount <= 1) {
+    const knitted = findKnittedDecompositions(counts, declaredMeldCount);
     results.push(...knitted);
   }
 

@@ -281,7 +281,6 @@ export default function ScoringTestPage() {
       bonusTileCount: 0,
       isKongDraw: false,
       isRobbingKong: false,
-      isLastTile: false,
       declaredMeldCount: melds.filter(m => !m.concealed).length,
       winTileVisibleCount: 0,
     };

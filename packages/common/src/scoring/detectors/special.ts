@@ -80,14 +80,17 @@ export function quanBuKao(hand: WinningHand): FanMatch[] {
 /** 组合龙 (12): knitted straight (1-4-7 / 2-5-8 / 3-6-9 across 3 suits) + normal melds */
 export function zuHeLong(hand: WinningHand): FanMatch[] {
   if (hand.form === "knitted") return [fm("组合龙", 12)];
+  // Also fire for 全不靠 when it contains a complete 9-tile knitted straight
+  if (hand.form === "allUnrelated" && hand.allUnrelated) {
+    const suited = hand.allUnrelated.filter(i => i < 27);
+    if (suited.length === 9) return [fm("组合龙", 12)];
+  }
   return [];
 }
 
 /** 七星不靠 (24): knitted straight + all 7 honors as singles */
 export function qiXingBuKao(hand: WinningHand): FanMatch[] {
-  if (hand.form !== "allUnrelated") return [];
-  // Check if all 7 honors are present
-  let honorCount = 0;
+  if (hand.form === "allHonors") { return [fm("七星不靠", 24)] }
   // allUnrelated indices should contain 9 knitted + 5 honors for 全不靠
   // For 七星不靠 we need 9 knitted + 7 honors = 16... but hand is 14 tiles.
   // Actually 七星不靠: 9 knitted tiles (3 per suit from disjoint sets) + 4 winds + 3 dragons = 16

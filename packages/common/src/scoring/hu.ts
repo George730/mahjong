@@ -38,6 +38,7 @@ export function buildWinningHand(
   const pair = decomp.form === "sevenPairs" ? decomp.pairs[0]
     : decomp.form === "thirteenOrphans" ? decomp.pair
     : decomp.form === "allUnrelated" ? -1
+    : decomp.form === "allHonors" ? -1
     : decomp.pair;
 
   const hand: WinningHand = {
@@ -52,10 +53,14 @@ export function buildWinningHand(
     hand.sevenPairs = decomp.pairs;
   }
   if (decomp.form === "thirteenOrphans") {
-    // Reconstruct all 14 tile indices from allMelds (empty) + pair
-    // Thirteen orphans: one of each orphan tile + one duplicate (the pair)
     const ORPHAN_INDICES = [0, 8, 9, 17, 18, 26, 27, 28, 29, 30, 31, 32, 33];
     hand.thirteenOrphansIndices = [...ORPHAN_INDICES, pair];
+  }
+  if (decomp.form === "allUnrelated" || decomp.form === "allHonors") {
+    hand.allUnrelated = decomp.indices;
+  }
+  if (decomp.form === "knitted") {
+    hand.allUnrelated = decomp.knittedIndices;
   }
 
   return hand;
@@ -109,14 +114,17 @@ export function completeHuFromTenpai(
     fans = applyExclusions(fans);
     fans = applyCapRules(fans);
 
-    const fanScore = scoreFans(fans);
+    let fanScore = scoreFans(fans);
     const bonusScore = context.bonusTileCount;
-    const totalScore = fanScore + bonusScore;
 
-    // Handle 无番和: if no fans at all, it's 8 points
-    if (fans.length === 0) {
+    // Handle 无番和: if no pattern fans (花牌 is bonus, not a pattern fan), score 8
+    const patternFans = fans.filter(f => f.fan !== "花牌");
+    if (patternFans.length === 0) {
       fans = [{ fan: "无番和", score: 8, count: 1, involvedMelds: [], involvedPair: false }];
+      fanScore = 8;
     }
+
+    const totalScore = fanScore + bonusScore;
 
     if (!bestResult || totalScore > bestResult.totalScore) {
       bestResult = { hand, fans, fanScore, bonusScore, totalScore };
@@ -152,13 +160,17 @@ export function scoreHandFull(
     );
 
     let finalFans = fans;
-    const fanScore = score;
+    let fanScore = score;
     const bonusScore = context.bonusTileCount;
-    const totalScore = fanScore + bonusScore;
 
-    if (finalFans.length === 0) {
+    // Handle 无番和: if no pattern fans (花牌 is bonus, not a pattern fan), score 8
+    const patternFans = finalFans.filter(f => f.fan !== "花牌");
+    if (patternFans.length === 0) {
       finalFans = [{ fan: "无番和", score: 8, count: 1, involvedMelds: [], involvedPair: false }];
+      fanScore = 8;
     }
+
+    const totalScore = fanScore + bonusScore;
 
     if (!bestResult || totalScore > bestResult.totalScore) {
       bestResult = { hand, fans: finalFans, fanScore, bonusScore, totalScore };

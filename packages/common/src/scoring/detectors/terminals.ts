@@ -16,6 +16,7 @@ function allIndices(hand: WinningHand): number[] {
   if (hand.pair >= 0) indices.push(hand.pair);
   if (hand.sevenPairs) indices.push(...hand.sevenPairs);
   if (hand.thirteenOrphansIndices) indices.push(...hand.thirteenOrphansIndices);
+  if (hand.allUnrelated) indices.push(...hand.allUnrelated);
   return indices;
 }
 
@@ -34,11 +35,6 @@ export function quanDaiYaoJiu(hand: WinningHand): FanMatch[] {
   if (!everyMeldHasTerminalOrHonor(hand)) return [];
   // Must have at least one chow (otherwise it's 混幺九 or 清幺九)
   if (!hand.allMelds.some(m => m.type === "chow")) return [];
-  // Must have both suited and honor tiles
-  const all = allIndices(hand);
-  const hasSuited = all.some(isSuited);
-  const hasHonor = all.some(isHonor);
-  if (!hasSuited || !hasHonor) return [];
   return [fm("全带幺九", 4)];
 }
 

@@ -22,7 +22,6 @@ function buildTenpaiWinContext(ctx: TenpaiContext, winTileIdx: number): WinConte
     bonusTileCount: ctx.bonusTileCount,
     isKongDraw: false,
     isRobbingKong: false,
-    isLastTile: false,
     declaredMeldCount: ctx.melds.length,
     winTileVisibleCount: 0,
   };

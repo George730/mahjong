@@ -17,15 +17,30 @@ export function pengPengHu(hand: WinningHand): FanMatch[] {
 
 /** Count concealed pungs (including concealed kongs treated as pungs for counting).
  *  When winning on a discard, a pung containing the win tile is NOT concealed
- *  (it was completed by claiming the discard). */
+ *  (it was completed by claiming the discard) — unless the win tile can be
+ *  assigned to another meld (a chow) or the pair instead. */
 function countConcealedPungs(hand: WinningHand): number {
   const isDiscard = hand.context.winSource === "discard" || hand.context.winSource === "robbingKong";
+  if (!isDiscard) {
+    // Self-draw: all concealed pungs/kongs count
+    return hand.allMelds.filter(m =>
+      (m.type === "pung" || m.type === "kong") && m.concealed
+    ).length;
+  }
+
+  // Check if the win tile can be assigned to a chow or the pair,
+  // allowing all concealed pungs to stay concealed
+  const winTileCanGoElsewhere =
+    hand.allMelds.some(m =>
+      m.type === "chow" && m.tileIndices.includes(hand.winTile)
+    ) || hand.winTile === hand.pair;
+
   let count = 0;
   let winMeldExcluded = false;
   for (const m of hand.allMelds) {
     if ((m.type !== "pung" && m.type !== "kong") || !m.concealed) continue;
-    // A concealed pung completed by the discarded win tile is not truly concealed
-    if (isDiscard && !winMeldExcluded && m.type === "pung" && m.tileIndices.includes(hand.winTile)) {
+    if (!winTileCanGoElsewhere && !winMeldExcluded
+        && m.type === "pung" && m.tileIndices.includes(hand.winTile)) {
       winMeldExcluded = true;
       continue;
     }
