@@ -714,9 +714,7 @@ function computeVisibleCounts(gameState: GameState, seatIndex: number): number[]
       for (const t of m.tiles) counts[faceToIndex(t.face)]++;
     }
   }
-  // Own bonus tiles are also known
-  const self = gameState.players[seatIndex];
-  for (const t of self.bonusTiles) counts[faceToIndex(t.face)]++;
+  // Bonus tiles (season/flower) are not part of the 34-tile index space — skip them
   return counts;
 }
 

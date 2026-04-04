@@ -7,6 +7,12 @@ export { findAllDecompositions, decompose, isSevenPairs, isThirteenOrphans } fro
 export { FAN_REGISTRY } from "./fan-registry.js";
 export { applyExclusions, applyCapRules, deduplicateIdenticalFans, applyOnlyOnce } from "./exclusions.js";
 export { meldsToScoringMelds } from "./tenpai.js";
+export { tileIndex, parseTiles, parseMelds as parseMeldNotation, tileDisplayName } from "./tile-parser.js";
+export { TEST_SCENARIOS, buildWinContext } from "./test-scenarios.js";
+
+export type {
+  TestScenario, ScenarioContext,
+} from "./test-scenarios.js";
 
 export type {
   WinningHand, ScoringMeld, WinContext, WinSource,

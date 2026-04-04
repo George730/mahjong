@@ -7,8 +7,9 @@ import {
   findAllDecompositions, scoreHandFull,
   computeTenpai,
   FAN_REGISTRY,
+  TEST_SCENARIOS, buildWinContext, parseTiles, parseMeldNotation, tileIndex, tileDisplayName,
   type ScoringMeld, type WinContext, type TenpaiResult, type ScoringResult, type FanMatch,
-  type TenpaiContext,
+  type TenpaiContext, type TestScenario,
 } from "@mahjong/common";
 import type { Tile, TileFace, Wind } from "@mahjong/common";
 
@@ -105,6 +106,176 @@ function MeldDisplay({ meld, onRemove }: { meld: MeldDef; onRemove: () => void }
       >
         ✕
       </button>
+    </div>
+  );
+}
+
+// --- Scenario runner ---
+
+function ScenarioRow({ scenario }: { scenario: TestScenario }) {
+  const [result, setResult] = useState<ScoringResult | null>(null);
+  const [expanded, setExpanded] = useState(false);
+
+  const runHu = useCallback(() => {
+    const counts = parseTiles(scenario.hand);
+    const declaredMelds = parseMeldNotation(scenario.melds);
+    const { winTileIdx, context } = buildWinContext(scenario.ctx, declaredMelds.length);
+    counts[winTileIdx]++;
+    const r = scoreHandFull(counts, declaredMelds, winTileIdx, context);
+    setResult(r);
+    setExpanded(true);
+  }, [scenario]);
+
+  const winTileName = tileDisplayName(tileIndex(scenario.ctx.winTile));
+
+  const sourceLabel = !scenario.ctx.winSource || scenario.ctx.winSource === "selfDraw" ? "自摸"
+    : scenario.ctx.winSource === "discard" ? "点炮"
+    : scenario.ctx.winSource === "kongDraw" ? "杠摸"
+    : "抢杠";
+
+  return (
+    <div className="border border-gray-700 rounded mb-1">
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        <span className="text-sm font-medium text-gray-200 w-28 shrink-0">{scenario.name}</span>
+        <span className="text-xs text-gray-400 truncate flex-1" title={scenario.hand + (scenario.melds.length ? " | " + scenario.melds.join(" ") : "")}>
+          {scenario.hand}
+          {scenario.melds.length > 0 && <span className="text-gray-500"> + {scenario.melds.join(" ")}</span>}
+        </span>
+        <span className="text-xs text-gray-500 w-12 shrink-0 text-right">{winTileName} {sourceLabel}</span>
+        <button
+          onClick={runHu}
+          className="px-3 py-0.5 bg-red-800/60 hover:bg-red-700/60 text-red-200 rounded text-xs shrink-0"
+        >
+          Hu
+        </button>
+        {result && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-xs text-gray-400 hover:text-gray-200"
+          >
+            {expanded ? "^" : "v"}
+          </button>
+        )}
+      </div>
+
+      {expanded && result && (
+        <div className="px-3 pb-2 border-t border-gray-700/50">
+          {!result.isWin ? (
+            <p className="text-red-400 text-xs mt-1">
+              Not a win: {result.reason === "insufficient-fan"
+                ? `Only ${result.bestScore} fan (need 8)`
+                : "No valid decomposition"}
+            </p>
+          ) : (
+            <div className="mt-1">
+              <div className="flex items-center gap-3 mb-1">
+                <span className="text-lg font-bold text-yellow-400">
+                  {result.result!.totalScore} fan
+                </span>
+                <span className="text-xs text-gray-400">
+                  (pattern: {result.result!.fanScore} + bonus: {result.result!.bonusScore})
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {result.result!.fans.map((fan, i) => (
+                  <span key={i} className="text-xs bg-gray-800 px-1.5 py-0.5 rounded border border-gray-700">
+                    <span className="text-gray-200">{fan.fan}</span>
+                    {fan.count > 1 && <span className="text-gray-500">x{fan.count}</span>}
+                    <span className="text-yellow-400 ml-1">{fan.score * fan.count}</span>
+                  </span>
+                ))}
+              </div>
+              {/* Show expected vs actual comparison */}
+              {(() => {
+                const actualNames = result.result!.fans.flatMap(f =>
+                  Array.from({ length: f.count }, () => f.fan)
+                ).sort();
+                const expectedNames = [...scenario.expected].sort();
+                const match = JSON.stringify(actualNames) === JSON.stringify(expectedNames);
+                return (
+                  <div className={`text-xs mt-1 ${match ? "text-emerald-400" : "text-red-400"}`}>
+                    {match ? "PASS" : `MISMATCH — expected: ${expectedNames.join(", ")}`}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ScenarioList() {
+  const [filter, setFilter] = useState("");
+  const [allResults, setAllResults] = useState<Map<string, ScoringResult>>(new Map());
+  const [showAll, setShowAll] = useState(false);
+
+  const filtered = useMemo(() => {
+    if (!filter) return TEST_SCENARIOS;
+    const q = filter.toLowerCase();
+    return TEST_SCENARIOS.filter(s =>
+      s.name.toLowerCase().includes(q) || s.expected.some(e => e.includes(filter))
+    );
+  }, [filter]);
+
+  const runAll = useCallback(() => {
+    const results = new Map<string, ScoringResult>();
+    for (const s of filtered) {
+      const counts = parseTiles(s.hand);
+      const declaredMelds = parseMeldNotation(s.melds);
+      const { winTileIdx, context } = buildWinContext(s.ctx, declaredMelds.length);
+      counts[winTileIdx]++;
+      results.set(s.name, scoreHandFull(counts, declaredMelds, winTileIdx, context));
+    }
+    setAllResults(results);
+    setShowAll(true);
+  }, [filtered]);
+
+  // Count pass/fail
+  const passCount = useMemo(() => {
+    if (allResults.size === 0) return null;
+    let pass = 0;
+    for (const s of filtered) {
+      const r = allResults.get(s.name);
+      if (!r || !r.isWin) continue;
+      const actualNames = r.result!.fans.flatMap(f =>
+        Array.from({ length: f.count }, () => f.fan)
+      ).sort();
+      const expectedNames = [...s.expected].sort();
+      if (JSON.stringify(actualNames) === JSON.stringify(expectedNames)) pass++;
+    }
+    return { pass, total: filtered.length };
+  }, [allResults, filtered]);
+
+  return (
+    <div className="mb-6 p-3 bg-gray-900/60 rounded border border-gray-700">
+      <div className="flex items-center gap-3 mb-3">
+        <h3 className="text-sm font-medium text-gray-300">Test Scenarios ({filtered.length})</h3>
+        <input
+          type="text"
+          value={filter}
+          onChange={e => setFilter(e.target.value)}
+          placeholder="Filter by name or fan..."
+          className="flex-1 px-2 py-1 bg-gray-800 border border-gray-600 rounded text-xs text-gray-200"
+        />
+        <button
+          onClick={runAll}
+          className="px-3 py-1 bg-red-800/60 hover:bg-red-700/60 text-red-200 rounded text-xs"
+        >
+          Run All
+        </button>
+        {passCount && (
+          <span className={`text-xs font-mono ${passCount.pass === passCount.total ? "text-emerald-400" : "text-red-400"}`}>
+            {passCount.pass}/{passCount.total}
+          </span>
+        )}
+      </div>
+      <div className="max-h-[60vh] overflow-y-auto">
+        {filtered.map(s => (
+          <ScenarioRow key={s.name} scenario={s} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -303,6 +474,9 @@ export default function ScoringTestPage() {
   return (
     <div className="max-w-4xl mx-auto mt-4 px-4 pb-16 select-none">
       <h1 className="text-xl font-bold mb-4">Scoring Engine Test</h1>
+
+      {/* Scenario test runner */}
+      <ScenarioList />
 
       {/* Status bar */}
       <div className="flex items-center gap-4 mb-4 text-sm text-gray-400">

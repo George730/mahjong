@@ -12,7 +12,11 @@ import { useState, useEffect } from "react";
 import { Canvas } from "@react-three/fiber";
 import { PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
-import { createFullSet, shuffle, type TileFace, type Tile, type Meld, type PlayerGameView, type PublicPlayerState, sameFace } from "@mahjong/common";
+import {
+  createFullSet, shuffle, type TileFace, type Tile, type Meld, type PlayerGameView, type PublicPlayerState, sameFace,
+  TEST_SCENARIOS, buildWinContext, parseTiles, parseMeldNotation, tileIndex, indexToFace, scoreHandFull,
+  type TestScenario, type RoundResult, type FanMatch,
+} from "@mahjong/common";
 import SceneLighting from "../components/three/SceneLighting.tsx";
 import TableMesh from "../components/three/TableMesh.tsx";
 import TileMesh from "../components/three/TileMesh.tsx";
@@ -119,7 +123,8 @@ type DemoScenario =
   | "after-chow"
   | "after-pung"
   | "after-open-kong"
-  | "after-closed-kong";
+  | "after-closed-kong"
+  | "hu-test";
 
 const SCENARIO_LABELS: Record<DemoScenario, string> = {
   "normal": "Normal Play",
@@ -131,6 +136,7 @@ const SCENARIO_LABELS: Record<DemoScenario, string> = {
   "after-pung": "After Pung (meld)",
   "after-open-kong": "After Open Kong (meld)",
   "after-closed-kong": "After Closed Kong (meld)",
+  "hu-test": "Hu Test",
 };
 
 // --- Mock data builders ---
@@ -392,18 +398,121 @@ function buildMockState(scenario: DemoScenario): {
         availableClaims: null,
       };
     }
+
+    case "hu-test": {
+      // Handled by buildHuMockState — fallback to normal
+      const hand = suitedTiles.slice(0, 14);
+      return {
+        mockView: {
+          phase: "playing", turnPhase: "discard", hand, drawnTile: null,
+          bonusTiles: myBonus, players: basePlayers(14), wallCount: 88,
+          currentTurn: 0, dealer: 0, roundWind: "east", turnCount: 0, lastDiscard: null,
+          roundResult: null,
+        },
+        handOrder: hand.map((t) => t.id),
+        highlightedTileIds: [],
+        availableClaims: null,
+      };
+    }
   }
+}
+
+// --- Hu test scenario builder ---
+
+/** Convert a TestScenario to a mock PlayerGameView with full scoring result. */
+function buildHuMockState(testScenario: TestScenario): {
+  mockView: PlayerGameView;
+  handOrder: number[];
+  highlightedTileIds: number[];
+  availableClaims: ReturnType<typeof useGameStore.getState>["availableClaims"];
+} {
+  // Parse hand tiles into counts, then create Tile objects
+  const counts = parseTiles(testScenario.hand);
+  const declaredMelds = parseMeldNotation(testScenario.melds);
+  const { winTileIdx, context: winContext } = buildWinContext(testScenario.ctx, declaredMelds.length);
+
+  // Build Tile objects for the hand (including win tile)
+  let nextId = 0;
+  const handTiles: Tile[] = [];
+  for (let idx = 0; idx < 34; idx++) {
+    for (let c = 0; c < counts[idx]; c++) {
+      handTiles.push({ id: nextId++, face: indexToFace(idx) });
+    }
+  }
+  // The win tile is the drawn tile (shown separately)
+  const drawnTile: Tile = { id: nextId++, face: indexToFace(winTileIdx) };
+
+  // Build exposed melds as Meld objects
+  const meldObjects: Meld[] = declaredMelds.map((m) => {
+    const tiles: Tile[] = m.tileIndices.map((idx) => ({ id: nextId++, face: indexToFace(idx) }));
+    return {
+      type: m.type,
+      tiles,
+      exposed: !m.concealed,
+      ...(m.concealed ? {} : { claimedTileId: tiles[tiles.length - 1].id }),
+    };
+  });
+
+  // Run the scoring engine
+  const fullCounts = [...counts];
+  fullCounts[winTileIdx]++;
+  const scoringResult = scoreHandFull(fullCounts, declaredMelds, winTileIdx, winContext);
+
+  // Build RoundResult
+  const roundResult: RoundResult = scoringResult.isWin ? {
+    type: "hu",
+    winnerSeat: 0,
+    discarderSeat: winContext.winSource === "discard" ? 3 : undefined,
+    winSource: winContext.winSource,
+    scoring: {
+      fans: scoringResult.result!.fans,
+      fanScore: scoringResult.result!.fanScore,
+      bonusScore: scoringResult.result!.bonusScore,
+      totalScore: scoringResult.result!.totalScore,
+    },
+  } : { type: "draw" };
+
+  const bonusCount = testScenario.ctx.bonusTileCount ?? 0;
+  const flowerNames = ["plum", "orchid", "bamboo", "chrysanthemum"] as const;
+  const bonusTiles: Tile[] = Array.from({ length: bonusCount }, (_, i) => ({
+    id: nextId++,
+    face: { category: "flower" as const, flower: flowerNames[i % 4] },
+  }));
+
+  const players: PublicPlayerState[] = [
+    { userId: "me", seatIndex: 0, handCount: handTiles.length, hasDrawnTile: true, bonusTiles, discards: [], melds: meldObjects },
+    { userId: "opp1", seatIndex: 1, handCount: 13, hasDrawnTile: false, bonusTiles: [], discards: [], melds: [] },
+    { userId: "opp2", seatIndex: 2, handCount: 13, hasDrawnTile: false, bonusTiles: [], discards: [], melds: [] },
+    { userId: "opp3", seatIndex: 3, handCount: 13, hasDrawnTile: false, bonusTiles: [], discards: [], melds: [] },
+  ];
+
+  return {
+    mockView: {
+      phase: "playing", turnPhase: "discard",
+      hand: handTiles, drawnTile,
+      bonusTiles, players, wallCount: testScenario.ctx.wallCount ?? 40,
+      currentTurn: 0, dealer: 0, roundWind: testScenario.ctx.roundWind ?? "east",
+      turnCount: 10, lastDiscard: null,
+      roundResult,
+    },
+    handOrder: handTiles.map((t) => t.id),
+    highlightedTileIds: [drawnTile.id],
+    availableClaims: null,
+  };
 }
 
 // --- Store-driven demo (HandLayout) ---
 
 /** Seed the game store and room store with mock data so HandLayout + TableOverlays render. */
-function useMockGameState(scenario: DemoScenario) {
+function useMockGameState(scenario: DemoScenario, huScenarioIndex: number) {
   const gameStore = useGameStore;
   const roomStore = useRoomStore;
 
   useEffect(() => {
-    const { mockView, handOrder, highlightedTileIds, availableClaims } = buildMockState(scenario);
+    const { mockView, handOrder, highlightedTileIds, availableClaims } =
+      scenario === "hu-test" && TEST_SCENARIOS[huScenarioIndex]
+        ? buildHuMockState(TEST_SCENARIOS[huScenarioIndex])
+        : buildMockState(scenario);
 
     gameStore.setState({
       gameView: mockView,
@@ -436,11 +545,11 @@ function useMockGameState(scenario: DemoScenario) {
       gameStore.getState().reset();
       roomStore.setState({ room: null });
     };
-  }, [scenario]);
+  }, [scenario, huScenarioIndex]);
 }
 
-function StoreDemoScene({ scenario }: { scenario: DemoScenario }) {
-  useMockGameState(scenario);
+function StoreDemoScene({ scenario, huScenarioIndex }: { scenario: DemoScenario; huScenarioIndex: number }) {
+  useMockGameState(scenario, huScenarioIndex);
   return (
     <>
       <HandLayout />
@@ -455,6 +564,9 @@ export default function SceneDemoPage() {
   const [mode, setMode] = useState<"static" | "store">("store");
   const [selected, setSelected] = useState<number | null>(null);
   const [scenario, setScenario] = useState<DemoScenario>("normal");
+  const [huScenarioIndex, setHuScenarioIndex] = useState(0);
+  const [huFilter, setHuFilter] = useState("");
+  const [huResult, setHuResult] = useState<{ fans: FanMatch[]; fanScore: number; bonusScore: number; totalScore: number; pass: boolean } | null>(null);
 
   return (
     <div className="max-w-5xl mx-auto mt-4 px-4">
@@ -491,6 +603,73 @@ export default function SceneDemoPage() {
           ))}
         </div>
       )}
+      {mode === "store" && scenario === "hu-test" && (
+        <div className="mb-3 p-2 bg-gray-900/60 rounded border border-gray-700">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs text-gray-400">Hu Scenario:</span>
+            <input
+              type="text"
+              value={huFilter}
+              onChange={(e) => setHuFilter(e.target.value)}
+              placeholder="Filter..."
+              className="flex-1 px-2 py-0.5 bg-gray-800 border border-gray-600 rounded text-xs text-gray-200"
+            />
+          </div>
+          <div className="flex flex-wrap gap-1 max-h-40 overflow-y-auto">
+            {TEST_SCENARIOS.map((s, i) => {
+              if (huFilter && !s.name.toLowerCase().includes(huFilter.toLowerCase())
+                && !s.expected.some(e => e.includes(huFilter))) return null;
+              return (
+                <button
+                  key={i}
+                  onClick={() => { setHuScenarioIndex(i); setHuResult(null); }}
+                  className={`px-2 py-0.5 rounded text-xs ${
+                    huScenarioIndex === i ? "bg-red-700 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                  }`}
+                  title={s.expected.join(", ")}
+                >
+                  {s.name}
+                </button>
+              );
+            })}
+          </div>
+          {TEST_SCENARIOS[huScenarioIndex] && (
+            <div className="mt-2 flex items-center gap-3">
+              <div className="text-xs text-gray-400 flex-1">
+                <span className="text-gray-200 font-medium">{TEST_SCENARIOS[huScenarioIndex].name}</span>
+                {" — expected: "}
+                {TEST_SCENARIOS[huScenarioIndex].expected.join(", ")}
+              </div>
+              <button
+                onClick={() => {
+                  const s = TEST_SCENARIOS[huScenarioIndex];
+                  const counts = parseTiles(s.hand);
+                  const declaredMelds = parseMeldNotation(s.melds);
+                  const { winTileIdx, context } = buildWinContext(s.ctx, declaredMelds.length);
+                  counts[winTileIdx]++;
+                  const r = scoreHandFull(counts, declaredMelds, winTileIdx, context);
+                  if (r.isWin) {
+                    const actualNames = r.result!.fans.flatMap(f => Array.from({ length: f.count }, () => f.fan)).sort();
+                    const expectedNames = [...s.expected].sort();
+                    setHuResult({
+                      fans: r.result!.fans,
+                      fanScore: r.result!.fanScore,
+                      bonusScore: r.result!.bonusScore,
+                      totalScore: r.result!.totalScore,
+                      pass: JSON.stringify(actualNames) === JSON.stringify(expectedNames),
+                    });
+                  } else {
+                    setHuResult({ fans: [], fanScore: 0, bonusScore: 0, totalScore: 0, pass: false });
+                  }
+                }}
+                className="px-4 py-1.5 bg-red-700 hover:bg-red-600 text-white rounded text-sm font-bold shrink-0"
+              >
+                Hu!
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       {/* Fan reference panel — fixed to right edge of viewport */}
       <SidePanel />
 
@@ -518,7 +697,7 @@ export default function SceneDemoPage() {
           {mode === "static" ? (
             <StaticDemoScene selectedIndex={selected} onSelect={setSelected} />
           ) : (
-            <StoreDemoScene scenario={scenario} />
+            <StoreDemoScene scenario={scenario} huScenarioIndex={huScenarioIndex} />
           )}
         </Canvas>
       </div>
@@ -527,11 +706,39 @@ export default function SceneDemoPage() {
           Selected tile: {selected !== null ? selected : "none"}
         </p>
       )}
-      {mode === "store" && (
+      {mode === "store" && scenario !== "hu-test" && (
         <p className="text-xs text-gray-500 mt-2">
           Scenario: {SCENARIO_LABELS[scenario]}. Click tiles to select. Drag across tiles to reorder.
           {scenario === "after-closed-kong" && " Hover over the face-down meld to reveal tiles (your closed kong only)."}
         </p>
+      )}
+      {mode === "store" && scenario === "hu-test" && huResult && (
+        <div className="mt-3 p-3 bg-gray-900/60 rounded border border-gray-700">
+          {huResult.fans.length === 0 ? (
+            <p className="text-red-400 text-sm">Not a valid hu</p>
+          ) : (
+            <>
+              <div className="flex items-center gap-4 mb-2">
+                <span className="text-2xl font-bold text-yellow-400">{huResult.totalScore} fan</span>
+                <span className="text-sm text-gray-400">
+                  (pattern: {huResult.fanScore} + bonus: {huResult.bonusScore})
+                </span>
+                <span className={`text-sm font-bold ${huResult.pass ? "text-emerald-400" : "text-red-400"}`}>
+                  {huResult.pass ? "PASS" : "MISMATCH"}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {huResult.fans.map((fan, i) => (
+                  <span key={i} className="text-sm bg-gray-800 px-2 py-1 rounded border border-gray-700">
+                    <span className="text-gray-200">{fan.fan}</span>
+                    {fan.count > 1 && <span className="text-gray-500"> x{fan.count}</span>}
+                    <span className="text-yellow-400 ml-1">{fan.score * fan.count}</span>
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       )}
     </div>
   );

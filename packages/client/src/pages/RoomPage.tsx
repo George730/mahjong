@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { MAX_PLAYERS, windForSeat, WIND_CN, type PlayerGameView } from "@mahjong/common";
+import { MAX_PLAYERS, windForSeat, WIND_CN, type PlayerGameView, type HuResultPayload } from "@mahjong/common";
 import { useAuthStore } from "../stores/auth-store.ts";
 import { useRoomStore } from "../stores/room-store.ts";
 import { useGameStore } from "../stores/game-store.ts";
@@ -12,6 +12,63 @@ import GameCanvas from "../components/three/GameCanvas.tsx";
 import HandLayout from "../components/three/HandLayout.tsx";
 import TableOverlays from "../components/three/TableOverlays.tsx";
 import SidePanel from "../components/SidePanel.tsx";
+
+/** Hu result overlay — shows winner, fans, and score. */
+function HuResultOverlay({
+  result,
+  players,
+}: {
+  result: HuResultPayload;
+  players: PlayerGameView["players"];
+}) {
+  const winner = players.find((p) => p.seatIndex === result.winnerSeat);
+  const winnerName = winner ? `${WIND_CN[windForSeat(result.winnerSeat)]}` : "???";
+  const sourceLabel =
+    result.winSource === "selfDraw" ? "Self-draw"
+    : result.winSource === "kongDraw" ? "Kong draw"
+    : result.winSource === "robbingKong" ? "Robbing kong"
+    : "Discard";
+
+  return (
+    <div className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-lg z-10">
+      <div className="bg-gray-900 border border-yellow-600/50 rounded-xl p-6 min-w-[280px] max-w-[400px]">
+        <h2 className="text-xl font-bold text-yellow-400 mb-1 text-center">
+          {winnerName} Wins!
+        </h2>
+        <p className="text-xs text-gray-400 text-center mb-3">{sourceLabel}</p>
+
+        <div className="space-y-1 mb-3 max-h-48 overflow-y-auto">
+          {result.fans.map((f, i) => (
+            <div key={i} className="flex justify-between text-sm">
+              <span className="text-gray-300">
+                {f.fan}
+                {f.count > 1 && <span className="text-gray-500 ml-1">x{f.count}</span>}
+              </span>
+              <span className="text-yellow-300 font-mono">{f.score * f.count}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="border-t border-gray-700 pt-2 space-y-1">
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-400">Fan score</span>
+            <span className="text-white font-mono">{result.fanScore}</span>
+          </div>
+          {result.bonusScore > 0 && (
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-400">Bonus</span>
+              <span className="text-white font-mono">+{result.bonusScore}</span>
+            </div>
+          )}
+          <div className="flex justify-between text-base font-bold">
+            <span className="text-yellow-400">Total</span>
+            <span className="text-yellow-400 font-mono">{result.totalScore}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /** In-game view — extracted so hooks can be used unconditionally. */
 function GameView({
@@ -37,6 +94,12 @@ function GameView({
   const claimClosedKongFn = useGameStore((s) => s.claimClosedKong);
   const claimPassFn = useGameStore((s) => s.claimPass);
   const claimRejectedMsg = useGameStore((s) => s.claimRejectedMsg);
+  const gameError = useGameStore((s) => s.error);
+  const canHuSelfDraw = useGameStore((s) => s.canHuSelfDraw);
+  const canHuDiscard = useGameStore((s) => s.canHuDiscard);
+  const declareHuFn = useGameStore((s) => s.declareHu);
+  const claimHuFn = useGameStore((s) => s.claimHu);
+  const huResult = useGameStore((s) => s.huResult);
 
   const mySeat = gameView.players.find((p) => p.userId === user?.id);
   const mySeatIndex = mySeat?.seatIndex ?? 0;
@@ -81,7 +144,7 @@ function GameView({
   const showClaimBtns =
     availableClaims !== null &&
     gameView.turnPhase === "claiming" &&
-    (availableClaims.chow.length > 0 || availableClaims.pung !== null || availableClaims.openKong !== null);
+    (availableClaims.chow.length > 0 || availableClaims.pung !== null || availableClaims.openKong !== null || canHuDiscard);
 
   // Show closed kong button during discard phase
   const showClosedKongBtn =
@@ -127,29 +190,65 @@ function GameView({
           <TableOverlays />
         </GameCanvas>
 
-        {/* Discard button — top-right over hand tiles */}
-        {showDiscardBtn && (
-          <button
-            onClick={handleDiscard}
-            className="absolute bottom-24 right-34 px-5 py-1.5 bg-red-700/50 hover:bg-red-600/60 rounded-lg font-medium text-white/90 shadow-lg transition-colors text-sm"
-          >
-            Discard
-          </button>
-        )}
-
-        {/* Closed kong button — shown alongside discard during own turn */}
-        {showClosedKongBtn && (
-          <button
-            onClick={handleClosedKong}
-            className="absolute bottom-24 right-52 px-4 py-1.5 bg-amber-700/50 hover:bg-amber-600/60 rounded-lg font-medium text-white/90 shadow-lg transition-colors text-sm"
-          >
-            Kong
-          </button>
+        {/* Self-draw action buttons */}
+        {(showDiscardBtn || showClosedKongBtn || canHuSelfDraw) && (
+          <div className="absolute bottom-24 right-34 flex gap-2">
+            {canHuSelfDraw && (
+              <button
+                onClick={declareHuFn}
+                className="px-5 py-1.5 bg-yellow-600/70 hover:bg-yellow-500/80 rounded-lg font-bold text-white shadow-lg transition-colors text-sm animate-pulse"
+              >
+                Hu!
+              </button>
+            )}
+            {showClosedKongBtn && (
+              <button
+                onClick={handleClosedKong}
+                className="px-4 py-1.5 bg-amber-700/50 hover:bg-amber-600/60 rounded-lg font-medium text-white/90 shadow-lg transition-colors text-sm"
+              >
+                Kong
+              </button>
+            )}
+            {showDiscardBtn && (
+              <button
+                onClick={handleDiscard}
+                className="px-5 py-1.5 bg-red-700/50 hover:bg-red-600/60 rounded-lg font-medium text-white/90 shadow-lg transition-colors text-sm"
+              >
+                Discard
+              </button>
+            )}
+          </div>
         )}
 
         {/* Claim buttons — shown during claiming phase */}
+        {/* Claim hu when no other claims exist but hu is available */}
+        {canHuDiscard && !showClaimBtns && gameView.turnPhase === "claiming" && (
+          <div className="absolute bottom-24 right-34 flex gap-2">
+            <button
+              onClick={claimHuFn}
+              className="px-5 py-1.5 bg-yellow-600/70 hover:bg-yellow-500/80 rounded-lg font-bold text-white shadow-lg transition-colors text-sm animate-pulse"
+            >
+              Hu!
+            </button>
+            <button
+              onClick={handlePass}
+              className="px-4 py-1.5 bg-gray-700/50 hover:bg-gray-600/60 rounded-lg font-medium text-white/90 shadow-lg transition-colors text-sm"
+            >
+              Pass
+            </button>
+          </div>
+        )}
+
         {showClaimBtns && (
           <div className="absolute bottom-24 right-34 flex gap-2">
+            {canHuDiscard && (
+              <button
+                onClick={claimHuFn}
+                className="px-5 py-1.5 bg-yellow-600/70 hover:bg-yellow-500/80 rounded-lg font-bold text-white shadow-lg transition-colors text-sm animate-pulse"
+              >
+                Hu!
+              </button>
+            )}
             {availableClaims!.chow.length > 0 && (
               <button
                 onClick={handleChow}
@@ -208,10 +307,32 @@ function GameView({
           </div>
         )}
 
+        {/* Game error notification */}
+        {gameError && (
+          <div className="absolute top-12 left-1/2 -translate-x-1/2 px-4 py-2 bg-orange-900/80 rounded-lg text-orange-200 text-sm font-medium shadow-lg">
+            {gameError}
+          </div>
+        )}
+
         {/* Claim rejected notification */}
         {claimRejectedMsg && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-red-900/80 rounded-lg text-red-200 text-sm font-medium shadow-lg animate-pulse">
             {claimRejectedMsg}
+          </div>
+        )}
+
+        {/* Hu result overlay */}
+        {huResult && (
+          <HuResultOverlay result={huResult} players={gameView.players} />
+        )}
+
+        {/* Round result (draw) */}
+        {gameView.roundResult?.type === "draw" && !huResult && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-lg">
+            <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 text-center">
+              <h2 className="text-xl font-bold text-gray-300 mb-2">Draw</h2>
+              <p className="text-sm text-gray-500">Wall exhausted — no winner this round.</p>
+            </div>
           </div>
         )}
       </div>

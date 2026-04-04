@@ -2,9 +2,9 @@
 // and meld claim detection/actions.
 
 import { create } from "zustand";
-import type { Tile, PlayerGameView } from "@mahjong/common";
-import { canChow, canPung, canOpenKong, canClosedKong } from "@mahjong/common";
-import type { ChowOption, PungOption, KongOption, ClosedKongOption } from "@mahjong/common";
+import type { Tile, PlayerGameView, TenpaiContext } from "@mahjong/common";
+import { canChow, canPung, canOpenKong, canClosedKong, computeTenpai, faceToIndex, windForSeat } from "@mahjong/common";
+import type { ChowOption, PungOption, KongOption, ClosedKongOption, HuResultPayload } from "@mahjong/common";
 import type { TypedSocket } from "../services/socket.ts";
 
 /** Cosmetic state for an opponent's hand (what we can see without knowing their tiles). */
@@ -44,6 +44,13 @@ interface GameStoreState {
   /** Brief message shown when a claim is outranked by higher priority. */
   claimRejectedMsg: string | null;
 
+  /** True when drawn tile completes the hand (self-draw hu available). */
+  canHuSelfDraw: boolean;
+  /** True when last discard completes the hand (claim hu available). */
+  canHuDiscard: boolean;
+  /** Hu result payload received from server. */
+  huResult: HuResultPayload | null;
+
   startGame: (socket: TypedSocket) => Promise<{ ok: boolean; error?: string }>;
   bindSocket: (socket: TypedSocket, userId: string) => void;
   selectTile: (tileId: number | null) => void;
@@ -56,8 +63,63 @@ interface GameStoreState {
   claimOpenKong: () => Promise<{ ok: boolean; error?: string }>;
   claimClosedKong: (tileIds: number[]) => Promise<{ ok: boolean; error?: string }>;
   claimPass: () => Promise<{ ok: boolean; error?: string }>;
+  declareHu: () => Promise<{ ok: boolean; error?: string }>;
+  claimHu: () => Promise<{ ok: boolean; error?: string }>;
   selectChowOption: (index: number | null) => void;
   reset: () => void;
+}
+
+/** Safe faceToIndex — returns -1 for bonus tiles. */
+function safeFaceToIndex(face: Tile["face"]): number {
+  if (face.category === "season" || face.category === "flower") return -1;
+  return faceToIndex(face);
+}
+
+/** Build visible tile counts from the game view (all discards, melds, own hand). */
+function buildVisibleCounts(state: PlayerGameView): number[] {
+  const counts = new Array(34).fill(0);
+  for (const p of state.players) {
+    for (const t of p.discards) {
+      const idx = safeFaceToIndex(t.face);
+      if (idx >= 0) counts[idx]++;
+    }
+    for (const m of p.melds) {
+      for (const t of m.tiles) {
+        const idx = safeFaceToIndex(t.face);
+        if (idx >= 0) counts[idx]++;
+      }
+    }
+  }
+  for (const t of state.hand) {
+    const idx = safeFaceToIndex(t.face);
+    if (idx >= 0) counts[idx]++;
+  }
+  if (state.drawnTile) {
+    const idx = safeFaceToIndex(state.drawnTile.face);
+    if (idx >= 0) counts[idx]++;
+  }
+  return counts;
+}
+
+/** Check if a tile index is in the tenpai waits for the hand. */
+function checkHu(hand: Tile[], tileIdx: number, state: PlayerGameView, mySeat: number): boolean {
+  const myPlayer = state.players.find(p => p.seatIndex === mySeat);
+  if (!myPlayer) return false;
+
+  const visibleCounts = buildVisibleCounts(state);
+  // Remove the winning tile from visible counts (it's being "added" to the hand)
+  visibleCounts[tileIdx] = Math.max(0, visibleCounts[tileIdx] - 1);
+
+  const ctx: TenpaiContext = {
+    melds: myPlayer.melds,
+    seatWind: windForSeat(mySeat),
+    roundWind: state.roundWind,
+    bonusTileCount: myPlayer.bonusTiles.length,
+    visibleCounts,
+  };
+
+  const result = computeTenpai(hand, ctx);
+  return result.waits.some(w => w.tileIndex === tileIdx);
 }
 
 function mergeHandOrder(serverHand: Tile[], currentOrder: number[]): number[] {
@@ -126,6 +188,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   highlightedTileIds: [],
   selectedChowOption: null,
   claimRejectedMsg: null,
+  canHuSelfDraw: false,
+  canHuDiscard: false,
+  huResult: null,
 
   startGame: async (socket) => {
     return new Promise((resolve) => {
@@ -194,11 +259,39 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         availableClaims,
         highlightedTileIds,
         selectedChowOption,
+        canHuSelfDraw: false,
+        canHuDiscard: false,
+        huResult: state.phase === "roundEnd" ? get().huResult : null,
       });
+
+      // Hu detection via tenpai — deferred so it doesn't block the state update
+      if (mySeat !== null) {
+        setTimeout(() => {
+          try {
+            if (state.turnPhase === "discard" && state.currentTurn === mySeat && state.drawnTile) {
+              const winIdx = safeFaceToIndex(state.drawnTile.face);
+              if (winIdx >= 0 && checkHu(state.hand, winIdx, state, mySeat)) {
+                set({ canHuSelfDraw: true });
+              }
+            } else if (state.turnPhase === "claiming" && state.lastDiscard && state.lastDiscard.fromSeat !== mySeat) {
+              const winIdx = safeFaceToIndex(state.lastDiscard.tile.face);
+              if (winIdx >= 0 && checkHu(state.hand, winIdx, state, mySeat)) {
+                set({ canHuDiscard: true });
+              }
+            }
+          } catch {
+            // Tenpai check failed — don't block the game
+          }
+        }, 0);
+      }
     });
 
     socket.on("game:error", (message) => {
       set({ error: message });
+    });
+
+    socket.on("game:huResult", (payload) => {
+      set({ huResult: payload });
     });
 
     socket.on("game:claimRejected", (payload) => {
@@ -436,6 +529,30 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     });
   },
 
+  declareHu: async () => {
+    const { socket } = get();
+    if (!socket) return { ok: false, error: "No socket" };
+    return new Promise((resolve) => {
+      socket.emit("game:declareHu", (res) => {
+        if (!res.ok) set({ error: res.error });
+        else set({ canHuSelfDraw: false });
+        resolve(res);
+      });
+    });
+  },
+
+  claimHu: async () => {
+    const { socket } = get();
+    if (!socket) return { ok: false, error: "No socket" };
+    return new Promise((resolve) => {
+      socket.emit("game:claimHu", (res) => {
+        if (!res.ok) set({ error: res.error });
+        else set({ availableClaims: null, highlightedTileIds: [], canHuDiscard: false });
+        resolve(res);
+      });
+    });
+  },
+
   claimPass: async () => {
     const { socket } = get();
     if (!socket) return { ok: false, error: "No socket" };
@@ -468,6 +585,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       highlightedTileIds: [],
       selectedChowOption: null,
       claimRejectedMsg: null,
+      canHuSelfDraw: false,
+      canHuDiscard: false,
+      huResult: null,
     });
   },
 }));
