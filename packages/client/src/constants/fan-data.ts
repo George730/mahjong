@@ -282,6 +282,13 @@ export const FAN_DATA: FanGroup[] = [
     ],
   },
   {
+    score: 5,
+    fans: [
+      f("明暗杠", 5,
+        "和牌时有一个明杠，和一个暗杠。"),
+    ],
+  },
+  {
     score: 4,
     fans: [
       f("全带幺九", 4,

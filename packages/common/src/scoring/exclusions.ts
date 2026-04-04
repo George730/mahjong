@@ -109,6 +109,7 @@ export function deduplicateIdenticalFans(matches: FanMatch[]): FanMatch[] {
 const COUNTING_FANS = new Set([
   "双暗刻", "三暗刻",     // count of concealed pungs
   "双暗杠", "双明杠",     // count of kongs by exposure
+  "明暗杠",               // 1 exposed + 1 concealed kong
   "三杠",                 // count of kongs
 ]);
 

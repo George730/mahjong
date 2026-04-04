@@ -3,7 +3,7 @@
 import type { FanDef } from "./types.js";
 
 // Category A: Meld patterns
-import { pengPengHu, siAnKe, sanAnKe, shuangAnKe, menQianQing, buQiuRen, quanQiuRen, siGang, sanGang, mingGang, anGang, shuangMingGang, shuangAnGang } from "./detectors/meld-pattern.js";
+import { pengPengHu, siAnKe, sanAnKe, shuangAnKe, menQianQing, buQiuRen, quanQiuRen, siGang, sanGang, mingGang, anGang, shuangMingGang, shuangAnGang, mingAnGang } from "./detectors/meld-pattern.js";
 // Category B: Chow relations
 import { yiBanGao, xiXiangFeng, lianLiu, laoShaoFu, yiSeSanTongShun, yiSeSiTongShun, sanSeSanTongShun, yiSeSanBuGao, yiSeSiBuGao, sanSeSanBuGao, qingLong, huaLong, yiSeShuangLongHui, sanSeShuangLongHui, pingHu } from "./detectors/chow-relations.js";
 // Category C: Pung relations
@@ -27,7 +27,7 @@ export const FAN_REGISTRY: FanDef[] = [
   { id: "大三元", score: 88, detector: daSanYuan, excludes: ["双箭刻", "箭刻"], situational: false },
   { id: "绿一色", score: 88, detector: lvYiSe, excludes: ["混一色"], situational: false },
   { id: "九莲宝灯", score: 88, detector: jiuLianBaoDeng, excludes: ["清一色", "门前清", "不求人", "无字", "单钓将", "边张", "坎张"], situational: false },
-  { id: "四杠", score: 88, detector: siGang, excludes: ["明杠", "双明杠", "碰碰和", "单钓将"], situational: false },
+  { id: "四杠", score: 88, detector: siGang, excludes: ["明杠", "双明杠", "明暗杠", "碰碰和", "单钓将"], situational: false },
   { id: "连七对", score: 88, detector: lianQiDui, excludes: ["清一色", "不求人", "门前清", "七对", "无字", "单钓将"], situational: false },
   { id: "十三幺", score: 88, detector: shiSanYao, excludes: ["五门齐", "不求人", "门前清", "单钓将"], situational: false },
 
@@ -45,7 +45,7 @@ export const FAN_REGISTRY: FanDef[] = [
 
   // 32 番
   { id: "一色四步高", score: 32, detector: yiSeSiBuGao, excludes: ["一色三步高", "连六", "老少副"], situational: false },
-  { id: "三杠", score: 32, detector: sanGang, excludes: ["暗杠", "双暗杠", "明杠", "双明杠"], situational: false },
+  { id: "三杠", score: 32, detector: sanGang, excludes: ["暗杠", "双暗杠", "明杠", "双明杠", "明暗杠"], situational: false },
   { id: "混幺九", score: 32, detector: hunYaoJiu, excludes: ["碰碰和", "全带幺九", "幺九刻"], situational: false },
 
   // 24 番
@@ -93,6 +93,9 @@ export const FAN_REGISTRY: FanDef[] = [
   { id: "混一色", score: 6, detector: hunYiSe, excludes: [], situational: false },
   { id: "三色三步高", score: 6, detector: sanSeSanBuGao, excludes: [], situational: false },
   { id: "五门齐", score: 6, detector: wuMenQi, excludes: [], situational: false },
+
+  // 5 番
+  { id: "明暗杠", score: 5, detector: mingAnGang, excludes: ["明杠", "暗杠"], situational: false },
 
   // 4 番
   { id: "全带幺九", score: 4, detector: quanDaiYaoJiu, excludes: [], situational: false },

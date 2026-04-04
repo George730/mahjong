@@ -149,3 +149,10 @@ export function shuangAnGang(hand: WinningHand): FanMatch[] {
   if (countKongs(hand, false) === 2) return [m("双暗杠", 6, [])];
   return [];
 }
+
+/** 明暗杠 (5): at least 1 exposed kong + at least 1 concealed kong */
+export function mingAnGang(hand: WinningHand): FanMatch[] {
+  if (countKongs(hand, true) >= 1 && countKongs(hand, false) >= 1)
+    return [m("明暗杠", 5, [])];
+  return [];
+}
