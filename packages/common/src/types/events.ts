@@ -42,6 +42,18 @@ export interface ClaimClosedKongPayload {
   tileIds: number[]; // IDs of all 4 tiles forming the closed kong
 }
 
+// --- Hu payloads ---
+
+export interface HuResultPayload {
+  winnerSeat: number;
+  discarderSeat?: number;
+  winSource: "selfDraw" | "discard" | "kongDraw" | "robbingKong";
+  fans: Array<{ fan: string; score: number; count: number }>;
+  fanScore: number;
+  bonusScore: number;
+  totalScore: number;
+}
+
 // --- Socket.IO event maps ---
 
 export interface ClaimRejectedPayload {
@@ -55,6 +67,7 @@ export interface ServerToClientEvents {
   "game:state": (state: PlayerGameView) => void;
   "game:error": (message: string) => void;
   "game:claimRejected": (payload: ClaimRejectedPayload) => void;
+  "game:huResult": (payload: HuResultPayload) => void;
   "game:tileSelected": (payload: TileSelectedPayload) => void;
   "game:tileDeselected": (payload: TileDeselectedPayload) => void;
   "game:handReordered": (payload: HandReorderedPayload) => void;
@@ -95,6 +108,12 @@ export interface ClientToServerEvents {
     callback: (response: { ok: true } | { ok: false; error: string }) => void,
   ) => void;
   "game:claimPass": (
+    callback: (response: { ok: true } | { ok: false; error: string }) => void,
+  ) => void;
+  "game:declareHu": (
+    callback: (response: { ok: true } | { ok: false; error: string }) => void,
+  ) => void;
+  "game:claimHu": (
     callback: (response: { ok: true } | { ok: false; error: string }) => void,
   ) => void;
   "game:tileSelected": (payload: TileSelectedPayload) => void;

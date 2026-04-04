@@ -1,7 +1,7 @@
 // Server-side game manager — starts games, persists state to Redis, sends player views
 
-import type { GameState, PendingClaim, ClaimResolution } from "@mahjong/common";
-import { deal, createPlayerView, drawTile, discardTile, declareClosedKong, submitClaim, passClaim, resolveClaims } from "@mahjong/common";
+import type { GameState, PendingClaim, ClaimResolution, RoundResult } from "@mahjong/common";
+import { deal, createPlayerView, drawTile, discardTile, declareClosedKong, submitClaim, passClaim, resolveClaims, declareSelfDrawHu } from "@mahjong/common";
 import { redis } from "../redis.js";
 
 const GAME_TTL_SECONDS = 4 * 60 * 60; // 4 hours
@@ -95,4 +95,22 @@ export function handleClaimPass(gameState: GameState, seatIndex: number): ClaimR
 export function handleDeclareClosedKong(gameState: GameState, seatIndex: number, tileIds: number[]): GameState {
   declareClosedKong(gameState, seatIndex, tileIds);
   return gameState;
+}
+
+/**
+ * Declares a self-draw hu (自摸). Returns the round result.
+ */
+export function handleDeclareSelfDrawHu(gameState: GameState, seatIndex: number): RoundResult {
+  return declareSelfDrawHu(gameState, seatIndex);
+}
+
+/**
+ * Submits a hu claim on a discard. Goes through the normal claim system.
+ */
+export function handleClaimHu(
+  gameState: GameState,
+  seatIndex: number,
+): ClaimResolution | null {
+  submitClaim(gameState, seatIndex, "hu");
+  return resolveClaims(gameState);
 }

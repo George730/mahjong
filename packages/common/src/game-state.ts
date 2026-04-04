@@ -3,6 +3,11 @@
 import type { Tile, TileFace, Wind } from "./tiles.js";
 import { createFullSet, shuffle, isBonusTile, sameFace } from "./tiles.js";
 import { canChow, canPung, canOpenKong } from "./melds.js";
+import type { FanMatch, WinContext, ScoringMeld, WinSource } from "./scoring/types.js";
+import { scoreHandFull } from "./scoring/hu.js";
+import { faceToIndex, tilesToCounts } from "./scoring/tile-encoding.js";
+import { meldsToScoringMelds } from "./scoring/tenpai.js";
+import { windForSeat } from "./seat-utils.js";
 
 // --- State machine phases ---
 
@@ -40,7 +45,7 @@ export interface Meld {
 /** A claim that has been submitted but not yet resolved (waiting for all players). */
 export interface PendingClaim {
   seatIndex: number;
-  type: "chow" | "pung" | "openKong";
+  type: "chow" | "pung" | "openKong" | "hu";
   handTileIds?: [number, number]; // needed for chow execution
 }
 
@@ -50,12 +55,33 @@ export interface ClaimResolution {
   losers: number[]; // seat indices whose claims were outranked
 }
 
-/** Priority: pung/openKong (2) > chow (1). */
+/** Priority: hu (3) > pung/openKong (2) > chow (1). */
 const CLAIM_PRIORITY: Record<PendingClaim["type"], number> = {
+  hu: 3,
   openKong: 2,
   pung: 2,
   chow: 1,
 };
+
+// --- Round result (stored when someone wins or draw) ---
+
+export interface RoundResult {
+  /** "hu" if a player won, "draw" if wall exhausted. */
+  type: "hu" | "draw";
+  /** Seat index of the winner (undefined on draw). */
+  winnerSeat?: number;
+  /** Seat index of the player who dealt in (undefined on self-draw or draw). */
+  discarderSeat?: number;
+  /** How the win was achieved. */
+  winSource?: WinSource;
+  /** Scoring breakdown (undefined on draw). */
+  scoring?: {
+    fans: FanMatch[];
+    fanScore: number;
+    bonusScore: number;
+    totalScore: number;
+  };
+}
 
 // --- Full game state (server-authoritative) ---
 
@@ -74,6 +100,8 @@ export interface GameState {
   claimPasses: number[];
   /** Claims submitted but not yet resolved (waiting for all players to decide). */
   pendingClaims: PendingClaim[];
+  /** Scoring result when round ends (hu or draw). */
+  roundResult: RoundResult | null;
 }
 
 // --- Player-visible state (sent to each client — hides other players' hands) ---
@@ -102,6 +130,8 @@ export interface PlayerGameView {
   turnCount: number;
   /** The last discarded tile available for claiming, or null. */
   lastDiscard: { tile: Tile; fromSeat: number } | null;
+  /** Round result (scoring breakdown) when phase is "roundEnd". */
+  roundResult: RoundResult | null;
 }
 
 // --- Deal result ---
@@ -182,6 +212,7 @@ export function deal(playerIds: string[], dealer: number = 0, roundWind: Wind = 
     lastDiscard: null,
     claimPasses: [],
     pendingClaims: [],
+    roundResult: null,
   };
 
   return { gameState };
@@ -224,6 +255,7 @@ export function drawTile(gameState: GameState): Tile | null {
   if (gameState.wall.length === 0) {
     // Wall exhausted — draw game
     gameState.phase = "roundEnd";
+    gameState.roundResult = { type: "draw" };
     return null;
   }
 
@@ -235,6 +267,7 @@ export function drawTile(gameState: GameState): Tile | null {
     player.bonusTiles.push(tile);
     if (gameState.wall.length === 0) {
       gameState.phase = "roundEnd";
+      gameState.roundResult = { type: "draw" };
       return null;
     }
     tile = gameState.wall.pop()!;
@@ -285,6 +318,7 @@ export function discardTile(gameState: GameState, tileId: number): void {
 
   // Pre-compute which non-discarder players have no claims → auto-pass them server-side.
   // This avoids client-side auto-pass race conditions with concurrent Redis writes.
+  // Also checks hu eligibility using the scoring engine.
   const autoPasses: number[] = [];
   for (let seat = 0; seat < 4; seat++) {
     if (seat === discarderSeat) continue;
@@ -292,7 +326,8 @@ export function discardTile(gameState: GameState, tileId: number): void {
     const hasChow = canChow(p.hand, discarded, seat, discarderSeat).length > 0;
     const hasPung = canPung(p.hand, discarded) !== null;
     const hasKong = canOpenKong(p.hand, discarded) !== null;
-    if (!hasChow && !hasPung && !hasKong) {
+    const hasHu = tryHu(gameState, seat, discarded, "discard") !== null;
+    if (!hasChow && !hasPung && !hasKong && !hasHu) {
       autoPasses.push(seat);
     }
   }
@@ -321,6 +356,7 @@ export function discardTile(gameState: GameState, tileId: number): void {
 function drawReplacementTile(gameState: GameState, player: PlayerState): void {
   if (gameState.wall.length === 0) {
     gameState.phase = "roundEnd";
+    gameState.roundResult = { type: "draw" };
     return;
   }
 
@@ -331,6 +367,7 @@ function drawReplacementTile(gameState: GameState, player: PlayerState): void {
     player.bonusTiles.push(tile);
     if (gameState.wall.length === 0) {
       gameState.phase = "roundEnd";
+      gameState.roundResult = { type: "draw" };
       return;
     }
     tile = gameState.wall.pop()!;
@@ -583,6 +620,12 @@ export function submitClaim(
       if (matching.length < 3) throw new Error("Not enough matching tiles for kong");
       break;
     }
+
+    case "hu": {
+      const huCheck = tryHu(gameState, seatIndex, gameState.lastDiscard!.tile, "discard");
+      if (!huCheck) throw new Error("Hand is not a valid winning hand");
+      break;
+    }
   }
 
   gameState.pendingClaims.push({ seatIndex, type: claimType, handTileIds });
@@ -640,6 +683,9 @@ export function resolveClaims(gameState: GameState): ClaimResolution | null {
 
   // Execute the winning claim
   switch (winner.type) {
+    case "hu":
+      executeDiscardHu(gameState, winner.seatIndex);
+      break;
     case "chow":
       claimChow(gameState, winner.seatIndex, winner.handTileIds!);
       break;
@@ -652,6 +698,141 @@ export function resolveClaims(gameState: GameState): ClaimResolution | null {
   }
 
   return { winner, losers };
+}
+
+// --- Hu (win) logic ---
+
+/**
+ * Compute visible tile counts for a given seat: all discards + all exposed melds
+ * + own concealed kongs (those tiles are known to be unavailable).
+ */
+function computeVisibleCounts(gameState: GameState, seatIndex: number): number[] {
+  const counts = new Array(34).fill(0);
+  for (const p of gameState.players) {
+    for (const t of p.discards) counts[faceToIndex(t.face)]++;
+    for (const m of p.melds) {
+      for (const t of m.tiles) counts[faceToIndex(t.face)]++;
+    }
+  }
+  // Own bonus tiles are also known
+  const self = gameState.players[seatIndex];
+  for (const t of self.bonusTiles) counts[faceToIndex(t.face)]++;
+  return counts;
+}
+
+/**
+ * Build a WinContext from the current game state for a given player.
+ */
+function buildWinContextFromGame(
+  gameState: GameState,
+  seatIndex: number,
+  winTileIdx: number,
+  winSource: WinSource,
+): WinContext {
+  const player = gameState.players[seatIndex];
+  const visibleCounts = computeVisibleCounts(gameState, seatIndex);
+  return {
+    winTile: winTileIdx,
+    winSource,
+    seatWind: windForSeat(seatIndex),
+    roundWind: gameState.roundWind,
+    seatIndex,
+    isDealer: seatIndex === gameState.dealer,
+    wallCount: gameState.wall.length,
+    bonusTileCount: player.bonusTiles.length,
+    isKongDraw: false, // TODO: track kong draw state
+    isRobbingKong: false, // TODO: track robbing kong
+    declaredMeldCount: player.melds.length,
+    winTileVisibleCount: visibleCounts[winTileIdx],
+  };
+}
+
+/**
+ * Check if a player can hu (win) with a given tile.
+ * Returns the scoring result if valid, null otherwise.
+ */
+function tryHu(
+  gameState: GameState,
+  seatIndex: number,
+  winTile: Tile,
+  winSource: WinSource,
+): { isWin: true; result: RoundResult } | null {
+  const player = gameState.players[seatIndex];
+  const winTileIdx = faceToIndex(winTile.face);
+
+  // Build hand counts: all hand tiles + win tile
+  const allTiles = player.drawnTile
+    ? [...player.hand, player.drawnTile]
+    : [...player.hand];
+  if (winSource === "discard") {
+    // For discard hu, win tile is not in hand yet — add it
+    allTiles.push(winTile);
+  }
+  // For self-draw, drawnTile is already included above
+
+  const counts = tilesToCounts(allTiles);
+  const declaredMelds = meldsToScoringMelds(player.melds);
+  const context = buildWinContextFromGame(gameState, seatIndex, winTileIdx, winSource);
+
+  const result = scoreHandFull(counts, declaredMelds, winTileIdx, context);
+
+  if (!result.isWin || !result.result) return null;
+
+  const scored = result.result;
+  return {
+    isWin: true,
+    result: {
+      type: "hu",
+      winnerSeat: seatIndex,
+      discarderSeat: winSource === "discard" ? gameState.lastDiscard?.fromSeat : undefined,
+      winSource,
+      scoring: {
+        fans: scored.fans,
+        fanScore: scored.fanScore,
+        bonusScore: scored.bonusScore,
+        totalScore: scored.totalScore,
+      },
+    },
+  };
+}
+
+/**
+ * Declares a self-draw hu (自摸) during the discard phase.
+ * The current player wins with their drawn tile instead of discarding.
+ */
+export function declareSelfDrawHu(gameState: GameState, seatIndex: number): RoundResult {
+  if (gameState.phase !== "playing") throw new Error("Game is not in playing phase");
+  if (gameState.turnPhase !== "discard") throw new Error("Not in discard phase");
+  if (gameState.currentTurn !== seatIndex) throw new Error("Not your turn");
+
+  const player = gameState.players[seatIndex];
+  if (!player.drawnTile) throw new Error("No drawn tile to win with");
+
+  const huResult = tryHu(gameState, seatIndex, player.drawnTile, "selfDraw");
+  if (!huResult) throw new Error("Hand is not a valid winning hand (insufficient fan or invalid decomposition)");
+
+  // Round ends
+  gameState.phase = "roundEnd";
+  gameState.roundResult = huResult.result;
+  return huResult.result;
+}
+
+/**
+ * Executes a hu claim on a discard (called from resolveClaims when hu wins).
+ */
+function executeDiscardHu(gameState: GameState, claimerSeat: number): RoundResult {
+  const ld = gameState.lastDiscard;
+  if (!ld) throw new Error("No discard to claim hu on");
+
+  const huResult = tryHu(gameState, claimerSeat, ld.tile, "discard");
+  if (!huResult) throw new Error("Hu claim invalid");
+
+  // Round ends — don't remove from discarder's discard pile (the winning tile stays visible)
+  gameState.phase = "roundEnd";
+  gameState.lastDiscard = null;
+  gameState.claimPasses = [];
+  gameState.roundResult = huResult.result;
+  return huResult.result;
 }
 
 /**
@@ -683,5 +864,6 @@ export function createPlayerView(gameState: GameState, seatIndex: number): Playe
     roundWind: gameState.roundWind,
     turnCount: gameState.turnCount,
     lastDiscard: gameState.lastDiscard,
+    roundResult: gameState.roundResult,
   };
 }

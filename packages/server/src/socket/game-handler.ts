@@ -1,7 +1,7 @@
 // Socket event handlers for game actions and cosmetic hand broadcasts
 
 import type { Server, Socket } from "socket.io";
-import type { ClientToServerEvents, ServerToClientEvents } from "@mahjong/common";
+import type { ClientToServerEvents, ServerToClientEvents, GameState } from "@mahjong/common";
 import { MAX_PLAYERS } from "@mahjong/common";
 import * as roomService from "../room/room-service.js";
 import * as gameManager from "../game/game-manager.js";
@@ -162,14 +162,27 @@ export function registerGameHandlers(
       // All players decided — broadcast resolved state
       broadcastViews(io, entry.roomCode, gameState);
 
+      // If hu won the claim, broadcast detailed scoring
+      const gs = gameState as GameState;
+      if (gs.roundResult?.type === "hu" && gs.roundResult.scoring) {
+        const rr = gs.roundResult;
+        io.to(entry.roomCode).emit("game:huResult", {
+          winnerSeat: rr.winnerSeat!,
+          discarderSeat: rr.discarderSeat,
+          winSource: rr.winSource!,
+          fans: rr.scoring!.fans.map(f => ({ fan: f.fan, score: f.score, count: f.count })),
+          fanScore: rr.scoring!.fanScore,
+          bonusScore: rr.scoring!.bonusScore,
+          totalScore: rr.scoring!.totalScore,
+        });
+      }
+
       // Notify losers whose claims were outranked
       if (resolution.losers.length > 0) {
         const winType = resolution.winner?.type ?? "unknown";
         for (const loserSeat of resolution.losers) {
-          const loserPlayer = (gameState as { players: Array<{ seatIndex: number; userId: string }> }).players
-            .find((p) => p.seatIndex === loserSeat);
+          const loserPlayer = gs.players.find((p) => p.seatIndex === loserSeat);
           if (!loserPlayer) continue;
-          // Find the loser's socket and send rejection
           for (const [, s] of io.sockets.sockets) {
             if (s.rooms.has(entry.roomCode) && s.user?.userId === loserPlayer.userId) {
               s.emit("game:claimRejected", {
@@ -290,6 +303,100 @@ export function registerGameHandlers(
 
         const resolution = gameManager.handleClaimPass(gameState, player.seatIndex);
         await handleClaimResolution(entry, gameState, resolution, callback);
+      } catch (err) {
+        callback({ ok: false, error: (err as Error).message });
+      }
+    });
+  });
+
+  // --- Self-draw hu (自摸) ---
+  socket.on("game:declareHu", async (callback) => {
+    const entry = getSocketRoom(socket.id);
+    if (!entry) return callback({ ok: false, error: "You are not in a room" });
+
+    await withRoomLock(entry.roomCode, async () => {
+      try {
+        const gameState = await gameManager.getGameState(entry.roomCode);
+        if (!gameState) return callback({ ok: false, error: "No active game" });
+
+        const player = gameState.players.find((p) => p.userId === socket.user.userId);
+        if (!player) return callback({ ok: false, error: "You are not in this game" });
+        if (gameState.currentTurn !== player.seatIndex) {
+          return callback({ ok: false, error: "Not your turn" });
+        }
+
+        const roundResult = gameManager.handleDeclareSelfDrawHu(gameState, player.seatIndex);
+        await gameManager.saveGameState(entry.roomCode, gameState);
+        broadcastViews(io, entry.roomCode, gameState);
+
+        // Broadcast detailed hu result to all players
+        if (roundResult.scoring) {
+          io.to(entry.roomCode).emit("game:huResult", {
+            winnerSeat: roundResult.winnerSeat!,
+            discarderSeat: roundResult.discarderSeat,
+            winSource: roundResult.winSource!,
+            fans: roundResult.scoring.fans.map(f => ({ fan: f.fan, score: f.score, count: f.count })),
+            fanScore: roundResult.scoring.fanScore,
+            bonusScore: roundResult.scoring.bonusScore,
+            totalScore: roundResult.scoring.totalScore,
+          });
+        }
+
+        callback({ ok: true });
+      } catch (err) {
+        callback({ ok: false, error: (err as Error).message });
+      }
+    });
+  });
+
+  // --- Claim hu on discard (点炮) ---
+  socket.on("game:claimHu", async (callback) => {
+    const entry = getSocketRoom(socket.id);
+    if (!entry) return callback({ ok: false, error: "You are not in a room" });
+
+    await withRoomLock(entry.roomCode, async () => {
+      try {
+        const gameState = await gameManager.getGameState(entry.roomCode);
+        if (!gameState) return callback({ ok: false, error: "No active game" });
+
+        const player = gameState.players.find((p) => p.userId === socket.user.userId);
+        if (!player) return callback({ ok: false, error: "You are not in this game" });
+
+        const resolution = gameManager.handleClaimHu(gameState, player.seatIndex);
+        await gameManager.saveGameState(entry.roomCode, gameState);
+
+        if (resolution) {
+          broadcastViews(io, entry.roomCode, gameState);
+
+          // If hu won, broadcast detailed result
+          if (gameState.roundResult?.type === "hu" && gameState.roundResult.scoring) {
+            const rr = gameState.roundResult;
+            io.to(entry.roomCode).emit("game:huResult", {
+              winnerSeat: rr.winnerSeat!,
+              discarderSeat: rr.discarderSeat,
+              winSource: rr.winSource!,
+              fans: rr.scoring!.fans.map(f => ({ fan: f.fan, score: f.score, count: f.count })),
+              fanScore: rr.scoring!.fanScore,
+              bonusScore: rr.scoring!.bonusScore,
+              totalScore: rr.scoring!.totalScore,
+            });
+          }
+
+          // Notify losers
+          if (resolution.losers.length > 0) {
+            for (const loserSeat of resolution.losers) {
+              const loserPlayer = gameState.players.find((p) => p.seatIndex === loserSeat);
+              if (!loserPlayer) continue;
+              for (const [, s] of io.sockets.sockets) {
+                if (s.rooms.has(entry.roomCode) && s.user?.userId === loserPlayer.userId) {
+                  s.emit("game:claimRejected", { reason: "Your claim was outranked by hu" });
+                }
+              }
+            }
+          }
+        }
+
+        callback({ ok: true });
       } catch (err) {
         callback({ ok: false, error: (err as Error).message });
       }
