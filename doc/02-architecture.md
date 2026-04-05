@@ -191,21 +191,181 @@ WAITING → DEALING → PLAYING → ROUND_END → (next round or GAME_END)
 
 ### 6.2 Turn Flow (PLAYING state)
 
+The game loop is a cycle of **draw → discard → claim resolution**. Each step
+is a server-authoritative state mutation in `game-state.ts`, broadcast to
+clients via `game:state`. The three key files:
+
+| File | Role |
+|------|------|
+| `packages/common/src/game-state.ts` | All game logic (state machine, draw, discard, claims, hu) |
+| `packages/server/src/game/game-manager.ts` | Thin wrapper: load/save Redis, call common functions |
+| `packages/server/src/socket/game-handler.ts` | Socket event handlers: receive intents, call manager, broadcast |
+
+#### Full turn cycle
+
 ```
-DRAW_TILE
-  → Player receives tile
-  → Check for self-drawn win (自摸)
-  → If win: → ROUND_END
-  → Else: player must DISCARD
+                        ┌──────────────────────────────────────────┐
+                        │              PLAYING phase               │
+                        └──────────────────────────────────────────┘
 
-DISCARD_TILE
-  → Tile placed on table
-  → Other players checked for claims (priority: Win > Kong > Pung > Chow)
-  → If claim: execute claim → claimer's turn (or ROUND_END if win)
-  → If no claim after timeout: next player's turn → DRAW_TILE
+  ┌─────────┐   drawTile()   ┌───────────┐
+  │  DRAW   │───────────────►│  DISCARD   │
+  │  phase  │  bonus tile?   │  phase     │
+  │         │◄──── yes ──────│(auto-swap) │
+  └─────────┘                └─────┬──────┘
+       ▲                           │
+       │                    Player may:
+       │                    ├─ declare self-draw hu ──► ROUND_END
+       │                    ├─ declare closed kong ──► draw replacement ──► DISCARD
+       │                    └─ discard a tile
+       │                           │
+       │                           ▼
+       │                    ┌─────────────┐
+       │                    │  CLAIMING    │
+       │                    │  phase       │
+       │                    └──────┬──────┘
+       │                           │
+       │                    Server auto-passes players with no claims.
+       │                    Remaining players submit: hu / kong / pung / chow / pass
+       │                           │
+       │                    ┌──────▼──────┐
+       │                    │  RESOLVE     │
+       │                    │  CLAIMS      │
+       │                    └──────┬──────┘
+       │                           │
+       │              ┌────────────┼────────────┐
+       │              ▼            ▼             ▼
+       │         all passed    hu wins      meld wins
+       │              │            │         (chow/pung/kong)
+       │              ▼            ▼             │
+       │         next player   ROUND_END        ▼
+       └──────── DRAW phase                 claimer's turn
+                                            ──► DISCARD phase
+```
 
-WALL_EXHAUSTED
-  → ROUND_END (draw game / 流局)
+#### Step-by-step: Draw
+
+```
+Client                          Server                         game-state.ts
+──────                          ──────                         ─────────────
+auto-draw fires
+  game:drawTile ──────────────►
+                                getGameState(room)
+                                drawTile(gameState)  ────────► wall.shift()
+                                                               bonus tile? → set aside, draw from wall end
+                                                               wall empty? → phase = roundEnd (流局)
+                                                               else → player.drawnTile = tile
+                                                                      turnPhase = "discard"
+                                saveGameState(room)
+                    ◄────────── broadcastViews()
+game:state received             game:state to all 4 clients
+  handOrder updated
+  check canHuSelfDraw (tenpai)
+  check canClosedKong
+```
+
+#### Step-by-step: Discard
+
+```
+Client                          Server                         game-state.ts
+──────                          ──────                         ─────────────
+user clicks Discard
+  game:discardTile ───────────►
+    { tileId }                  getGameState(room)
+                                handleDiscardTile(gs, tileId) ► discardTile(gameState, tileId)
+                                                                 find tile in hand or drawnTile
+                                                                 move to player.discards
+                                                                 set lastDiscard = { tile, fromSeat }
+                                                                 ┌─ for each other seat:
+                                                                 │   check canChow / canPung / canOpenKong
+                                                                 │   check tryHu (scoring engine)
+                                                                 │   no claims? → auto-pass
+                                                                 └─ all 3 auto-passed?
+                                                                      yes → skip to next player DRAW
+                                                                      no  → turnPhase = "claiming"
+                                saveGameState(room)
+                    ◄────────── broadcastViews()
+game:state received             game:state to all 4 clients
+  compute availableClaims
+  check canHuDiscard (tenpai)
+  show claim buttons if eligible
+```
+
+#### Step-by-step: Claim resolution
+
+```
+Client                          Server                         game-state.ts
+──────                          ──────                         ─────────────
+player clicks Hu/Pung/Chow/Pass
+  game:claimXxx ──────────────►
+                                submitClaim(gs, seat, type) ──► add to pendingClaims[]
+                                resolveClaims(gameState) ─────► all seats decided?
+                                                                  no  → return null (wait)
+                                                                  yes → pick highest priority:
+                                                                        hu(3) > pung/kong(2) > chow(1)
+                                                                        ties: closest to discarder
+                                │
+                                ├─ resolution = null:
+                                │    save state, callback ok, no broadcast (wait for others)
+                                │
+                                ├─ resolution = { winner: hu }:
+                                │    executeDiscardHu() ──────► tryHu() → scoreHandFull()
+                                │                               claimer.drawnTile = win tile
+                                │                               phase = "roundEnd"
+                                │    broadcastViews()
+                                │    emit game:huResult ──────► { fans, fanScore, totalScore, ... }
+                                │    emit game:claimRejected ─► to outranked players
+                                │
+                                └─ resolution = { winner: chow/pung/kong }:
+                                     execute meld claim ──────► move tiles from hand to melds[]
+                                                                claimer becomes currentTurn
+                                                                turnPhase = "discard" (or "draw" for kong)
+                                     broadcastViews()
+                                     emit game:claimRejected ─► to outranked players
+```
+
+#### Step-by-step: Self-draw Hu
+
+```
+Client                          Server                         game-state.ts
+──────                          ──────                         ─────────────
+tenpai check shows Hu! button
+user clicks Hu!
+  game:declareHu ─────────────►
+                                declareSelfDrawHu(gs, seat) ──► tryHu(gs, seat, drawnTile, "selfDraw")
+                                                                  scoreHandFull() → isWin? ≥8 fan?
+                                                                  yes → phase = "roundEnd"
+                                                                        roundResult = { type: "hu", ... }
+                                                                  no  → throw error
+                                saveGameState(room)
+                    ◄────────── broadcastViews()
+                    ◄────────── emit game:huResult
+game:state received
+  phase = "roundEnd"
+  all hands revealed (revealedHand on PublicPlayerState)
+  closed kongs: outer 2 tiles face-up
+  HuResultOverlay shown:
+    winner name + wind, 自摸和牌 / 点炮
+    14 tiles (13 hand + 1 highlighted win tile) + melds
+    compacted fan list + total score
+```
+
+#### Round end reveal
+
+When `phase = "roundEnd"`, `createPlayerView()` populates `revealedHand` and
+`revealedDrawnTile` on every `PublicPlayerState`. The client:
+
+1. Lays all opponent hands flat (face-up) via `OpponentHand` with `revealed` prop
+2. Reveals closed kong outer tiles (tiles 0 and 3) face-up
+3. Shows the `HuResultOverlay` (hu) or draw overlay (wall exhausted)
+
+#### Claim priority
+
+```
+Priority 3:  Hu    (any seat)
+Priority 2:  Kong  (any seat)  ═══╗
+             Pung  (any seat)  ═══╝  same priority — closer to discarder wins
+Priority 1:  Chow  (left seat only)
 ```
 
 ### 6.3 Scoring Engine
