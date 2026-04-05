@@ -79,10 +79,16 @@ function HuResultOverlay({
   result,
   players,
   roomPlayers,
+  onClose,
+  isHost,
+  onNextRound,
 }: {
   result: HuResultPayload;
   players: PlayerGameView["players"];
   roomPlayers: Room["players"];
+  onClose: () => void;
+  isHost: boolean;
+  onNextRound: () => void;
 }) {
   const winner = players.find((p) => p.seatIndex === result.winnerSeat);
   const winnerRoom = roomPlayers.find((p) => p.seatIndex === result.winnerSeat);
@@ -100,7 +106,15 @@ function HuResultOverlay({
 
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-lg z-10">
-      <div className="bg-gray-900 border border-yellow-600/50 rounded-xl p-6 min-w-[320px] max-w-[480px]">
+      <div className="bg-gray-900 border border-yellow-600/50 rounded-xl p-6 min-w-[320px] max-w-[480px] relative">
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          className="absolute top-2 right-2 w-7 h-7 flex items-center justify-center rounded-full bg-gray-700/80 hover:bg-gray-600 text-gray-400 hover:text-white transition-colors text-sm"
+          title="Close (view table)"
+        >
+          &times;
+        </button>
         {/* Winner line */}
         <h2 className="text-lg font-bold text-yellow-400 mb-0.5 text-center">
           {isSelfDraw
@@ -177,6 +191,19 @@ function HuResultOverlay({
             <span className="text-yellow-400 font-mono">{result.totalScore}</span>
           </div>
         </div>
+
+        {/* Next Round button — host only */}
+        {isHost && (
+          <button
+            onClick={onNextRound}
+            className="w-full mt-4 py-2 bg-emerald-700 hover:bg-emerald-600 rounded-lg font-medium text-white transition-colors text-sm"
+          >
+            Next Round
+          </button>
+        )}
+        {!isHost && (
+          <p className="text-xs text-gray-500 text-center mt-3">Waiting for host to start next round...</p>
+        )}
       </div>
     </div>
   );
@@ -212,7 +239,11 @@ function GameView({
   const declareHuFn = useGameStore((s) => s.declareHu);
   const claimHuFn = useGameStore((s) => s.claimHu);
   const huResult = useGameStore((s) => s.huResult);
+  const resultOverlayVisible = useGameStore((s) => s.resultOverlayVisible);
+  const toggleResultOverlay = useGameStore((s) => s.toggleResultOverlay);
+  const nextRoundFn = useGameStore((s) => s.nextRound);
 
+  const isHost = user?.id === room.hostId;
   const mySeat = gameView.players.find((p) => p.userId === user?.id);
   const mySeatIndex = mySeat?.seatIndex ?? 0;
   const isMyTurn = gameView.currentTurn === mySeatIndex;
@@ -434,17 +465,61 @@ function GameView({
         )}
 
         {/* Hu result overlay */}
-        {huResult && (
-          <HuResultOverlay result={huResult} players={gameView.players} roomPlayers={room.players} />
+        {huResult && resultOverlayVisible && (
+          <HuResultOverlay
+            result={huResult}
+            players={gameView.players}
+            roomPlayers={room.players}
+            onClose={toggleResultOverlay}
+            isHost={isHost}
+            onNextRound={nextRoundFn}
+          />
         )}
 
         {/* Round result (draw) */}
-        {gameView.roundResult?.type === "draw" && !huResult && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-lg">
-            <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 text-center">
+        {gameView.roundResult?.type === "draw" && !huResult && resultOverlayVisible && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-lg z-10">
+            <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 text-center relative">
+              <button
+                onClick={toggleResultOverlay}
+                className="absolute top-2 right-2 w-7 h-7 flex items-center justify-center rounded-full bg-gray-700/80 hover:bg-gray-600 text-gray-400 hover:text-white transition-colors text-sm"
+                title="Close (view table)"
+              >
+                &times;
+              </button>
               <h2 className="text-xl font-bold text-gray-300 mb-2">Draw</h2>
-              <p className="text-sm text-gray-500">Wall exhausted — no winner this round.</p>
+              <p className="text-sm text-gray-500 mb-4">Wall exhausted — no winner this round.</p>
+              {isHost ? (
+                <button
+                  onClick={nextRoundFn}
+                  className="px-6 py-2 bg-emerald-700 hover:bg-emerald-600 rounded-lg font-medium text-white transition-colors text-sm"
+                >
+                  Next Round
+                </button>
+              ) : (
+                <p className="text-xs text-gray-500">Waiting for host to start next round...</p>
+              )}
             </div>
+          </div>
+        )}
+
+        {/* Show Results button — visible when overlay is dismissed during roundEnd */}
+        {gameView.phase === "roundEnd" && !resultOverlayVisible && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-2 z-10">
+            <button
+              onClick={toggleResultOverlay}
+              className="px-4 py-1.5 bg-gray-800/90 hover:bg-gray-700/90 border border-gray-600 rounded-lg text-sm text-gray-300 hover:text-white shadow-lg transition-colors"
+            >
+              Show Results
+            </button>
+            {isHost && (
+              <button
+                onClick={nextRoundFn}
+                className="px-4 py-1.5 bg-emerald-700/90 hover:bg-emerald-600/90 rounded-lg text-sm text-white font-medium shadow-lg transition-colors"
+              >
+                Next Round
+              </button>
+            )}
           </div>
         )}
       </div>

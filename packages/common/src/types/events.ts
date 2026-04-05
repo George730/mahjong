@@ -116,6 +116,9 @@ export interface ClientToServerEvents {
   "game:claimHu": (
     callback: (response: { ok: true } | { ok: false; error: string }) => void,
   ) => void;
+  "game:nextRound": (
+    callback: (response: { ok: true } | { ok: false; error: string }) => void,
+  ) => void;
   "game:tileSelected": (payload: TileSelectedPayload) => void;
   "game:tileDeselected": (payload: TileDeselectedPayload) => void;
   "game:handReordered": (payload: HandReorderedPayload) => void;

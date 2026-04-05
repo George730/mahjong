@@ -50,8 +50,11 @@ interface GameStoreState {
   canHuDiscard: boolean;
   /** Hu result payload received from server. */
   huResult: HuResultPayload | null;
+  /** Whether the result overlay is shown (user can toggle). */
+  resultOverlayVisible: boolean;
 
   startGame: (socket: TypedSocket) => Promise<{ ok: boolean; error?: string }>;
+  nextRound: () => Promise<{ ok: boolean; error?: string }>;
   bindSocket: (socket: TypedSocket, userId: string) => void;
   selectTile: (tileId: number | null) => void;
   emitDragHover: (fromIndex: number, hoverIndex: number | null) => void;
@@ -66,6 +69,7 @@ interface GameStoreState {
   declareHu: () => Promise<{ ok: boolean; error?: string }>;
   claimHu: () => Promise<{ ok: boolean; error?: string }>;
   selectChowOption: (index: number | null) => void;
+  toggleResultOverlay: () => void;
   reset: () => void;
 }
 
@@ -191,6 +195,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   canHuSelfDraw: false,
   canHuDiscard: false,
   huResult: null,
+  resultOverlayVisible: true,
 
   startGame: async (socket) => {
     return new Promise((resolve) => {
@@ -198,6 +203,18 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         if (!res.ok) {
           set({ error: res.error });
         }
+        resolve(res);
+      });
+    });
+  },
+
+  nextRound: async () => {
+    const { socket } = get();
+    if (!socket) return { ok: false, error: "No socket" };
+    return new Promise((resolve) => {
+      socket.emit("game:nextRound", (res) => {
+        if (!res.ok) set({ error: res.error });
+        else set({ huResult: null, resultOverlayVisible: true });
         resolve(res);
       });
     });
@@ -262,6 +279,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         canHuSelfDraw: false,
         canHuDiscard: false,
         huResult: state.phase === "roundEnd" ? get().huResult : null,
+        resultOverlayVisible: state.phase === "roundEnd" ? get().resultOverlayVisible : true,
       });
 
       // Hu detection via tenpai — deferred so it doesn't block the state update
@@ -572,6 +590,10 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     set({ selectedChowOption: index, highlightedTileIds: highlights });
   },
 
+  toggleResultOverlay: () => {
+    set((s) => ({ resultOverlayVisible: !s.resultOverlayVisible }));
+  },
+
   reset: () => {
     set({
       gameView: null,
@@ -588,6 +610,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       canHuSelfDraw: false,
       canHuDiscard: false,
       huResult: null,
+      resultOverlayVisible: true,
     });
   },
 }));

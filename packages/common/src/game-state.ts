@@ -673,10 +673,17 @@ export function resolveClaims(gameState: GameState): ClaimResolution | null {
     return { winner: null, losers: [] };
   }
 
-  // Sort by priority (higher = wins)
-  const sorted = [...gameState.pendingClaims].sort(
-    (a, b) => CLAIM_PRIORITY[b.type] - CLAIM_PRIORITY[a.type],
-  );
+  // Sort by priority (higher = wins), then by proximity to discarder in play order
+  // (lower distance = closer in turn order = wins the tiebreak among same-priority claims)
+  const discarderSeat = gameState.lastDiscard!.fromSeat;
+  const sorted = [...gameState.pendingClaims].sort((a, b) => {
+    const priDiff = CLAIM_PRIORITY[b.type] - CLAIM_PRIORITY[a.type];
+    if (priDiff !== 0) return priDiff;
+    // Same priority — closer to discarder in play order wins
+    const distA = (a.seatIndex - discarderSeat + 4) % 4;
+    const distB = (b.seatIndex - discarderSeat + 4) % 4;
+    return distA - distB;
+  });
 
   const winner = sorted[0];
   const losers = sorted.slice(1).map((c) => c.seatIndex);

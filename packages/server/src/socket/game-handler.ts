@@ -403,6 +403,36 @@ export function registerGameHandlers(
     });
   });
 
+  // --- Next round (host only) ---
+  socket.on("game:nextRound", async (callback) => {
+    const entry = getSocketRoom(socket.id);
+    if (!entry) return callback({ ok: false, error: "You are not in a room" });
+
+    await withRoomLock(entry.roomCode, async () => {
+      try {
+        const room = await roomService.getRoom(entry.roomCode);
+        if (!room) return callback({ ok: false, error: "Room not found" });
+        if (room.hostId !== socket.user.userId) {
+          return callback({ ok: false, error: "Only the host can start the next round" });
+        }
+
+        const gameState = await gameManager.getGameState(entry.roomCode);
+        if (!gameState) return callback({ ok: false, error: "No active game" });
+        if (gameState.phase !== "roundEnd") {
+          return callback({ ok: false, error: "Round has not ended yet" });
+        }
+
+        const newState = gameManager.startNextRound(gameState);
+        await gameManager.saveGameState(entry.roomCode, newState);
+        broadcastViews(io, entry.roomCode, newState);
+
+        callback({ ok: true });
+      } catch (err) {
+        callback({ ok: false, error: (err as Error).message });
+      }
+    });
+  });
+
   // --- Cosmetic hand broadcasts (relay to other players in room, no server-side mutation) ---
 
   socket.on("game:tileSelected", (payload) => {

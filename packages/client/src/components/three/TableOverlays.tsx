@@ -166,6 +166,7 @@ function buildIndicatorTexture(
   seatWinds: [string, string, string, string],
   currentTurn: number,
   dealer: number,
+  isDraw: boolean,
 ): THREE.CanvasTexture {
   const S = TEX_SIZE;
   const canvas = document.createElement("canvas");
@@ -196,12 +197,18 @@ function buildIndicatorTexture(
   ctx.lineWidth = 3;
   ctx.stroke();
 
-  // Wall count in center
+  // Wall count (or 流局) in center
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.font = `bold ${S * 0.16}px sans-serif`;
-  ctx.fillStyle = "#e0e0e0";
-  ctx.fillText(String(wallCount), cx, cy);
+  if (isDraw) {
+    ctx.font = `bold ${S * 0.14}px sans-serif`;
+    ctx.fillStyle = "#f59e0b";
+    ctx.fillText("流局", cx, cy);
+  } else {
+    ctx.font = `bold ${S * 0.16}px sans-serif`;
+    ctx.fillStyle = "#e0e0e0";
+    ctx.fillText(String(wallCount), cx, cy);
+  }
 
   // Wind characters at cardinal positions, each rotated to face its player
   const windR = (outerR + innerR) / 2;
@@ -260,15 +267,17 @@ function CenterIndicator({
   seatWinds,
   currentTurn,
   dealer,
+  isDraw,
 }: {
   wallCount: number;
   seatWinds: [string, string, string, string];
   currentTurn: number;
   dealer: number;
+  isDraw: boolean;
 }) {
   const texture = useMemo(
-    () => buildIndicatorTexture(wallCount, seatWinds, currentTurn, dealer),
-    [wallCount, seatWinds, currentTurn, dealer],
+    () => buildIndicatorTexture(wallCount, seatWinds, currentTurn, dealer, isDraw),
+    [wallCount, seatWinds, currentTurn, dealer, isDraw],
   );
 
   return (
@@ -617,6 +626,7 @@ export default function TableOverlays() {
         seatWinds={seatWinds}
         currentTurn={currentTurnRelIdx}
         dealer={dealerRelIdx}
+        isDraw={gameView.phase === "roundEnd" && gameView.roundResult?.type === "draw"}
       />
 
       {seatSides.map(({ seat, side }) => {

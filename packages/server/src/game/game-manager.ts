@@ -114,3 +114,18 @@ export function handleClaimHu(
   submitClaim(gameState, seatIndex, "hu");
   return resolveClaims(gameState);
 }
+
+/**
+ * Starts the next round: re-deal with the same players, rotating dealer by 1.
+ */
+export function startNextRound(gameState: GameState): GameState {
+  if (gameState.phase !== "roundEnd") throw new Error("Round has not ended yet");
+
+  const playerIds = gameState.players
+    .sort((a, b) => a.seatIndex - b.seatIndex)
+    .map((p) => p.userId);
+
+  const nextDealer = (gameState.dealer + 1) % 4;
+  const { gameState: newState } = deal(playerIds, nextDealer);
+  return newState;
+}
