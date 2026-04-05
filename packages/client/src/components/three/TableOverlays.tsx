@@ -44,7 +44,7 @@ const LABEL_CONFIGS: Record<string, LabelConfig> = Object.fromEntries(
 // shifted inward (toward center) by one tile depth so they don't overlap.
 const BONUS_GAP = TILE_WIDTH + 0.02;
 const BONUS_INWARD = 0.65; // shift toward center from hand row
-const BONUS_SCALE = 0.7;
+const BONUS_SCALE = 0.8;
 
 interface BonusConfig {
   /** Position for the i-th bonus tile (in world coords, not scaled). */
@@ -322,12 +322,12 @@ function BonusTiles({ tiles, side }: { tiles: Tile[]; side: string }) {
 
 const DISCARD_COLS = 6;
 const DISCARD_ROWS = 4;
-const DISCARD_TILE_SCALE = 0.75;
+const DISCARD_TILE_SCALE = 0.8;
 const DISCARD_GAP_X = (TILE_WIDTH + 0.02) * DISCARD_TILE_SCALE;
-const DISCARD_GAP_Z = 0.48 * DISCARD_TILE_SCALE; // row spacing (tile height when flat)
+const DISCARD_GAP_Z = 0.6 * DISCARD_TILE_SCALE; // row spacing (tile height when flat)
 
 // Discard area center distance from table center (between indicator and hand)
-const DISCARD_CENTER_Z = 2;
+const DISCARD_CENTER_Z = 2.2;
 
 interface DiscardConfig {
   /** Position for tile at (row, col) in world coords. Row 0 is closest to center. */
@@ -418,20 +418,23 @@ const MELD_CONFIGS: Record<string, MeldConfig> = Object.fromEntries(
   }),
 );
 
-/** Single concealed kong — face-down tiles that the owner can hover to reveal. */
+/** Single concealed kong — face-down tiles that the owner can hover to reveal.
+ *  At round end (revealed=true), the two outer tiles are shown face-up. */
 function ConcealedKongMeld({
   meld,
   tileOffsets,
   config,
   isOwner,
+  revealed,
 }: {
   meld: Meld;
   tileOffsets: number[];
   config: MeldConfig;
   isOwner: boolean;
+  revealed?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
-  const showFace = isOwner && hovered;
+  const showFace = (isOwner && hovered) || revealed;
 
   return (
     <group
@@ -445,10 +448,13 @@ function ConcealedKongMeld({
           worldPos[1] / MELD_SCALE,
           worldPos[2] / MELD_SCALE,
         ];
+        // At round end, reveal outer two tiles (0 and 3), middle two stay face-down
+        const isOuter = j === 0 || j === meld.tiles.length - 1;
+        const tileShowFace = revealed ? isOuter : showFace;
         return (
           <group key={tile.id} position={localPos} rotation={[0, config.orientY, 0]}>
             <TileMesh
-              face={showFace ? tile.face : undefined}
+              face={tileShowFace ? tile.face : undefined}
               flat
               position={[0, 0, 0]}
               rotationY={0}
@@ -473,7 +479,7 @@ function meldTileWorldWidth(isClaimed: boolean): number {
 const CLAIMED_ALIGN_SHIFT = (TILE_HEIGHT - TILE_WIDTH) / 2;
 
 /** Meld area — exposed/concealed melds to the right of each player's hand row. */
-function MeldArea({ melds, side, isOwner }: { melds: Meld[]; side: string; isOwner: boolean }) {
+function MeldArea({ melds, side, isOwner, revealed }: { melds: Meld[]; side: string; isOwner: boolean; revealed?: boolean }) {
   const config = MELD_CONFIGS[side];
   if (!config || !melds.length) return null;
 
@@ -513,6 +519,7 @@ function MeldArea({ melds, side, isOwner }: { melds: Meld[]; side: string; isOwn
               tileOffsets={tileOffsets}
               config={config}
               isOwner={isOwner}
+              revealed={revealed}
             />
           );
         }
@@ -634,7 +641,7 @@ export default function TableOverlays() {
               side={side}
               highlightTileId={seat === highlightDiscardSeat && highlightedTileIds.length > 0 ? highlightDiscardId : undefined}
             />
-            <MeldArea melds={player.melds} side={side} isOwner={seat === mySeatIndex} />
+            <MeldArea melds={player.melds} side={side} isOwner={seat === mySeatIndex} revealed={gameView.phase === "roundEnd"} />
           </group>
         );
       })}

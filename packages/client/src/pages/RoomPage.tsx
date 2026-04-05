@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { MAX_PLAYERS, windForSeat, WIND_CN, type PlayerGameView, type HuResultPayload } from "@mahjong/common";
+import { MAX_PLAYERS, windForSeat, WIND_CN, type PlayerGameView, type HuResultPayload, type Tile, type TileFace, type Room } from "@mahjong/common";
 import { useAuthStore } from "../stores/auth-store.ts";
 import { useRoomStore } from "../stores/room-store.ts";
 import { useGameStore } from "../stores/game-store.ts";
@@ -13,42 +13,154 @@ import HandLayout from "../components/three/HandLayout.tsx";
 import TableOverlays from "../components/three/TableOverlays.tsx";
 import SidePanel from "../components/SidePanel.tsx";
 
+// --- Tile display helpers ---
+
+const SUIT_CN: Record<string, string> = { wan: "万", tiao: "条", tong: "筒" };
+const WIND_LABEL: Record<string, string> = { east: "東", south: "南", west: "西", north: "北" };
+const DRAGON_LABEL: Record<string, string> = { zhong: "中", fa: "發", bai: "白" };
+
+function tileFaceLabel(face: TileFace): string {
+  switch (face.category) {
+    case "suited": return `${face.rank}${SUIT_CN[face.suit]}`;
+    case "wind": return WIND_LABEL[face.wind];
+    case "dragon": return DRAGON_LABEL[face.dragon];
+    case "season": return face.season;
+    case "flower": return face.flower;
+  }
+}
+
+function tileColorClass(face: TileFace): string {
+  if (face.category === "suited") {
+    if (face.suit === "wan") return "text-red-400";
+    if (face.suit === "tong") return "text-blue-400";
+    return "text-green-400";
+  }
+  if (face.category === "dragon") {
+    if (face.dragon === "zhong") return "text-red-400";
+    if (face.dragon === "fa") return "text-green-400";
+    return "text-gray-300";
+  }
+  return "text-yellow-300";
+}
+
+/** Compact duplicate fans: group by name, sum counts. */
+function compactFans(fans: HuResultPayload["fans"]): HuResultPayload["fans"] {
+  const map = new Map<string, { fan: string; score: number; count: number }>();
+  for (const f of fans) {
+    const existing = map.get(f.fan);
+    if (existing) {
+      existing.count += f.count;
+    } else {
+      map.set(f.fan, { ...f });
+    }
+  }
+  return [...map.values()];
+}
+
+/** Mini tile badge for the result overlay. */
+function TileBadge({ face, highlight, meld }: { face: TileFace; highlight?: boolean; meld?: boolean }) {
+  return (
+    <span
+      className={`inline-block px-1 py-0.5 rounded text-xs font-bold border ${
+        highlight
+          ? "bg-yellow-500/30 border-yellow-500 ring-1 ring-yellow-400"
+          : meld
+            ? "bg-gray-700/80 border-gray-500"
+            : "bg-gray-800 border-gray-600"
+      } ${tileColorClass(face)}`}
+    >
+      {tileFaceLabel(face)}
+    </span>
+  );
+}
+
 /** Hu result overlay — shows winner, fans, and score. */
 function HuResultOverlay({
   result,
   players,
+  roomPlayers,
 }: {
   result: HuResultPayload;
   players: PlayerGameView["players"];
+  roomPlayers: Room["players"];
 }) {
   const winner = players.find((p) => p.seatIndex === result.winnerSeat);
-  const winnerName = winner ? `${WIND_CN[windForSeat(result.winnerSeat)]}` : "???";
-  const sourceLabel =
-    result.winSource === "selfDraw" ? "Self-draw"
-    : result.winSource === "kongDraw" ? "Kong draw"
-    : result.winSource === "robbingKong" ? "Robbing kong"
-    : "Discard";
+  const winnerRoom = roomPlayers.find((p) => p.seatIndex === result.winnerSeat);
+  const winnerWind = WIND_CN[windForSeat(result.winnerSeat)];
+  const winnerName = winnerRoom?.username ?? "???";
+
+  const isSelfDraw = result.winSource === "selfDraw" || result.winSource === "kongDraw";
+
+  // Winner's revealed hand tiles + melds
+  const handTiles = winner?.revealedHand ?? [];
+  const drawnTile = winner?.revealedDrawnTile ?? null;
+  const melds = winner?.melds ?? [];
+
+  const compacted = compactFans(result.fans);
 
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-lg z-10">
-      <div className="bg-gray-900 border border-yellow-600/50 rounded-xl p-6 min-w-[280px] max-w-[400px]">
-        <h2 className="text-xl font-bold text-yellow-400 mb-1 text-center">
-          {winnerName} Wins!
+      <div className="bg-gray-900 border border-yellow-600/50 rounded-xl p-6 min-w-[320px] max-w-[480px]">
+        {/* Winner line */}
+        <h2 className="text-lg font-bold text-yellow-400 mb-0.5 text-center">
+          {isSelfDraw
+            ? `${winnerWind} ${winnerName} 自摸和牌`
+            : `${winnerWind} ${winnerName} 和牌`}
         </h2>
-        <p className="text-xs text-gray-400 text-center mb-3">{sourceLabel}</p>
 
-        <div className="space-y-1 mb-3 max-h-48 overflow-y-auto">
-          {result.fans.map((f, i) => (
+        {/* Discarder line */}
+        {!isSelfDraw && result.discarderSeat !== undefined && (() => {
+          const discarderRoom = roomPlayers.find((p) => p.seatIndex === result.discarderSeat);
+          const discarderWind = WIND_CN[windForSeat(result.discarderSeat!)];
+          const discarderName = discarderRoom?.username ?? "???";
+          return (
+            <p className="text-sm text-red-400 text-center mb-2">
+              {discarderWind} {discarderName} 点炮
+            </p>
+          );
+        })()}
+
+        {isSelfDraw && <div className="mb-2" />}
+
+        {/* Winner's hand tiles */}
+        <div className="flex flex-wrap gap-0.5 justify-center mb-3 pb-2 border-b border-gray-700">
+          {/* Closed hand */}
+          {handTiles.map((t) => (
+            <TileBadge key={t.id} face={t.face} />
+          ))}
+          {/* Drawn tile / win tile */}
+          {drawnTile && (
+            <>
+              <span className="w-1" />
+              <TileBadge face={drawnTile.face} highlight />
+            </>
+          )}
+          {/* Melds — uniform style, visually distinct from hand */}
+          {melds.map((m, mi) => (
+            <span key={mi} className="inline-flex gap-0.5 ml-2 pl-2 border-l border-gray-600">
+              {m.tiles.map((t) => (
+                <TileBadge key={t.id} face={t.face} meld />
+              ))}
+            </span>
+          ))}
+        </div>
+
+        {/* Fan list — compacted */}
+        <div className="space-y-0.5 mb-3 max-h-40 overflow-y-auto">
+          {compacted.map((f, i) => (
             <div key={i} className="flex justify-between text-sm">
               <span className="text-gray-300">
                 {f.fan}
                 {f.count > 1 && <span className="text-gray-500 ml-1">x{f.count}</span>}
               </span>
-              <span className="text-yellow-300 font-mono">{f.score * f.count}</span>
+              <span className="text-yellow-300 font-mono">
+                {f.count > 1 ? `${f.score}x${f.count}` : f.score}
+              </span>
             </div>
           ))}
         </div>
 
+        {/* Score totals */}
         <div className="border-t border-gray-700 pt-2 space-y-1">
           <div className="flex justify-between text-sm">
             <span className="text-gray-400">Fan score</span>
@@ -78,7 +190,7 @@ function GameView({
   onLeave,
 }: {
   gameView: PlayerGameView;
-  room: { code: string };
+  room: Room;
   user: { id: string } | null;
   onLeave: () => void;
 }) {
@@ -323,7 +435,7 @@ function GameView({
 
         {/* Hu result overlay */}
         {huResult && (
-          <HuResultOverlay result={huResult} players={gameView.players} />
+          <HuResultOverlay result={huResult} players={gameView.players} roomPlayers={room.players} />
         )}
 
         {/* Round result (draw) */}

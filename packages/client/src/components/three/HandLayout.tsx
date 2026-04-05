@@ -244,6 +244,7 @@ function ViewerHand({
 
 /** Opponent hand — standing tiles, face outward (viewer sees tile backs).
  *  Shows selection lift and drag-to-reorder gap animation from broadcasts.
+ *  At round end, tiles are laid flat with faces revealed.
  *
  *  Uses `tileOrder` (stable identities) as React keys so that after a reorder
  *  the TileMesh instances keep their identity and lerp smoothly to new slots
@@ -252,14 +253,20 @@ function OpponentHand({
   player,
   opponentState,
   side,
+  revealed,
 }: {
   player: PublicPlayerState;
   opponentState?: OpponentHandState;
   side: "top" | "left" | "right";
+  revealed?: boolean;
 }) {
   const config = SIDE_CONFIGS[side];
   const selectedPos = opponentState?.selectedPosition ?? null;
   const drag = opponentState?.dragging ?? null;
+
+  const revealedHand = player.revealedHand ?? [];
+  const revealedDrawnTile = player.revealedDrawnTile ?? null;
+  const isRevealed = revealed && revealedHand.length > 0;
 
   // Stable identity array — survives reorders so React keys produce smooth lerp.
   // Falls back to sequential [0,1,2,...] if store hasn't been populated yet.
@@ -286,13 +293,40 @@ function OpponentHand({
   };
 
   // Position for opponent's drawn tile: after the last hand tile with a gap.
-  // Use the canonical approach: compute the position as if it were one more tile
-  // slot further along, offset by the gap, using the side's rotation.
   const angle = SIDE_ANGLES[side as keyof typeof SIDE_ANGLES];
   const drawnTilePos: [number, number, number] = rotateAroundY(
     [ROW_LEFT + player.handCount * GAP + DRAWN_TILE_GAP, 0, TABLE_EDGE],
     angle,
   );
+
+  // Revealed mode: lay tiles flat with face visible
+  if (isRevealed) {
+    return (
+      <group>
+        {revealedHand.map((tile, i) => (
+          <TileMesh
+            key={`${side}-rev-${tile.id}`}
+            face={tile.face}
+            position={config.position(i)}
+            rotationY={config.rotationY}
+            flat
+            interactive={false}
+          />
+        ))}
+        {revealedDrawnTile && (
+          <TileMesh
+            key={`${side}-rev-drawn`}
+            face={revealedDrawnTile.face}
+            position={drawnTilePos}
+            rotationY={config.rotationY}
+            flat
+            highlighted
+            interactive={false}
+          />
+        )}
+      </group>
+    );
+  }
 
   return (
     <group>
@@ -335,6 +369,8 @@ export default function HandLayout() {
 
   if (!gameView || mySeatIndex === null) return null;
 
+  const isRoundEnd = gameView.phase === "roundEnd";
+
   // Build ordered tile list from handOrder IDs
   const tileById = new Map(gameView.hand.map((t) => [t.id, t]));
   const orderedHand: Tile[] = handOrder
@@ -374,6 +410,7 @@ export default function HandLayout() {
             player={player}
             opponentState={opponentHands[seat]}
             side={side}
+            revealed={isRoundEnd}
           />
         );
       })}

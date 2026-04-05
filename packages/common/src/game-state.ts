@@ -114,6 +114,10 @@ export interface PublicPlayerState {
   bonusTiles: Tile[];
   discards: Tile[];
   melds: Meld[];
+  /** Revealed at round end so all players can see each other's hands. */
+  revealedHand?: Tile[];
+  /** Revealed drawn tile at round end. */
+  revealedDrawnTile?: Tile | null;
 }
 
 export interface PlayerGameView {
@@ -825,7 +829,16 @@ function executeDiscardHu(gameState: GameState, claimerSeat: number): RoundResul
   const huResult = tryHu(gameState, claimerSeat, ld.tile, "discard");
   if (!huResult) throw new Error("Hu claim invalid");
 
-  // Round ends — don't remove from discarder's discard pile (the winning tile stays visible)
+  // Place win tile as the claimer's drawnTile so it appears highlighted in the round-end reveal
+  const claimer = gameState.players[claimerSeat];
+  claimer.drawnTile = ld.tile;
+
+  // Remove the won tile from the discarder's discard pile
+  const discarder = gameState.players[ld.fromSeat];
+  const discardIdx = discarder.discards.findIndex(t => t.id === ld.tile.id);
+  if (discardIdx >= 0) discarder.discards.splice(discardIdx, 1);
+
+  // Round ends
   gameState.phase = "roundEnd";
   gameState.lastDiscard = null;
   gameState.claimPasses = [];
@@ -839,6 +852,7 @@ function executeDiscardHu(gameState: GameState, claimerSeat: number): RoundResul
 export function createPlayerView(gameState: GameState, seatIndex: number): PlayerGameView {
   const player = gameState.players[seatIndex];
 
+  const isRoundEnd = gameState.phase === "roundEnd";
   const players: PublicPlayerState[] = gameState.players.map((p) => ({
     userId: p.userId,
     seatIndex: p.seatIndex,
@@ -847,6 +861,7 @@ export function createPlayerView(gameState: GameState, seatIndex: number): Playe
     bonusTiles: p.bonusTiles,
     discards: p.discards,
     melds: p.melds,
+    ...(isRoundEnd ? { revealedHand: p.hand, revealedDrawnTile: p.drawnTile } : {}),
   }));
 
   return {
