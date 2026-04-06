@@ -423,6 +423,21 @@ export function registerGameHandlers(
         }
 
         const newState = gameManager.startNextRound(gameState);
+
+        if (newState === null) {
+          // All 16 hands complete — mark game as ended
+          gameState.phase = "gameEnd";
+          await gameManager.saveGameState(entry.roomCode, gameState);
+          broadcastViews(io, entry.roomCode, gameState);
+
+          // Update room status back to waiting so host can start a new game
+          await roomService.updateRoomStatus(entry.roomCode, "waiting");
+          const updatedRoom = await roomService.getRoom(entry.roomCode);
+          if (updatedRoom) io.to(entry.roomCode).emit("room:updated", updatedRoom);
+
+          return callback({ ok: true });
+        }
+
         await gameManager.saveGameState(entry.roomCode, newState);
         broadcastViews(io, entry.roomCode, newState);
 

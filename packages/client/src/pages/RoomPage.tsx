@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { MAX_PLAYERS, windForSeat, WIND_CN, type PlayerGameView, type HuResultPayload, type Tile, type TileFace, type Room } from "@mahjong/common";
+import { MAX_PLAYERS, seatWind, WIND_CN, TOTAL_HANDS, type PlayerGameView, type HuResultPayload, type Tile, type TileFace, type Room } from "@mahjong/common";
 import { useAuthStore } from "../stores/auth-store.ts";
 import { useRoomStore } from "../stores/room-store.ts";
 import { useGameStore } from "../stores/game-store.ts";
@@ -79,20 +79,18 @@ function HuResultOverlay({
   result,
   players,
   roomPlayers,
+  dealer,
   onClose,
-  isHost,
-  onNextRound,
 }: {
   result: HuResultPayload;
   players: PlayerGameView["players"];
   roomPlayers: Room["players"];
+  dealer: number;
   onClose: () => void;
-  isHost: boolean;
-  onNextRound: () => void;
 }) {
   const winner = players.find((p) => p.seatIndex === result.winnerSeat);
   const winnerRoom = roomPlayers.find((p) => p.seatIndex === result.winnerSeat);
-  const winnerWind = WIND_CN[windForSeat(result.winnerSeat)];
+  const winnerWind = WIND_CN[seatWind(result.winnerSeat, dealer)];
   const winnerName = winnerRoom?.username ?? "???";
 
   const isSelfDraw = result.winSource === "selfDraw" || result.winSource === "kongDraw";
@@ -105,8 +103,14 @@ function HuResultOverlay({
   const compacted = compactFans(result.fans);
 
   return (
-    <div className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-lg z-10">
-      <div className="bg-gray-900 border border-yellow-600/50 rounded-xl p-6 min-w-[320px] max-w-[480px] relative">
+    <div
+      className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-lg z-10 pointer-events-auto"
+      onClick={onClose}
+    >
+      <div
+        className="bg-gray-900 border border-yellow-600/50 rounded-xl p-6 min-w-[320px] max-w-[480px] relative"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Close button */}
         <button
           onClick={onClose}
@@ -125,7 +129,7 @@ function HuResultOverlay({
         {/* Discarder line */}
         {!isSelfDraw && result.discarderSeat !== undefined && (() => {
           const discarderRoom = roomPlayers.find((p) => p.seatIndex === result.discarderSeat);
-          const discarderWind = WIND_CN[windForSeat(result.discarderSeat!)];
+          const discarderWind = WIND_CN[seatWind(result.discarderSeat!, dealer)];
           const discarderName = discarderRoom?.username ?? "???";
           return (
             <p className="text-sm text-red-400 text-center mb-2">
@@ -192,18 +196,6 @@ function HuResultOverlay({
           </div>
         </div>
 
-        {/* Next Round button — host only */}
-        {isHost && (
-          <button
-            onClick={onNextRound}
-            className="w-full mt-4 py-2 bg-emerald-700 hover:bg-emerald-600 rounded-lg font-medium text-white transition-colors text-sm"
-          >
-            Next Round
-          </button>
-        )}
-        {!isHost && (
-          <p className="text-xs text-gray-500 text-center mt-3">Waiting for host to start next round...</p>
-        )}
       </div>
     </div>
   );
@@ -244,6 +236,7 @@ function GameView({
   const nextRoundFn = useGameStore((s) => s.nextRound);
 
   const isHost = user?.id === room.hostId;
+  const isLastHand = gameView.windRoundIndex * 4 + gameView.handIndex >= TOTAL_HANDS - 1;
   const mySeat = gameView.players.find((p) => p.userId === user?.id);
   const mySeatIndex = mySeat?.seatIndex ?? 0;
   const isMyTurn = gameView.currentTurn === mySeatIndex;
@@ -308,14 +301,14 @@ function GameView({
         <div className="text-sm text-gray-400">
           Room <span className="text-emerald-400 tracking-widest font-mono">{room.code}</span>
           <span className="mx-2">·</span>
-          Round: {WIND_CN[gameView.roundWind]}
+          {WIND_CN[gameView.roundWind]}{["一","二","三","四"][gameView.handIndex]}局
           <span className="mx-2">·</span>
           {isMyTurn ? (
             <span className="text-yellow-400 font-medium">Your turn</span>
           ) : gameView.turnPhase === "claiming" ? (
             <span className="text-cyan-400 font-medium">Claim window</span>
           ) : (
-            <span className="text-gray-500">{WIND_CN[windForSeat(gameView.currentTurn)]}'s turn</span>
+            <span className="text-gray-500">{WIND_CN[seatWind(gameView.currentTurn, gameView.dealer)]}'s turn</span>
           )}
         </div>
         <button
@@ -335,7 +328,7 @@ function GameView({
 
         {/* Self-draw action buttons */}
         {(showDiscardBtn || showClosedKongBtn || canHuSelfDraw) && (
-          <div className="absolute bottom-24 right-34 flex gap-2">
+          <div className="absolute bottom-[18%] right-[15%] flex gap-2">
             {canHuSelfDraw && (
               <button
                 onClick={declareHuFn}
@@ -366,7 +359,7 @@ function GameView({
         {/* Claim buttons — shown during claiming phase */}
         {/* Claim hu when no other claims exist but hu is available */}
         {canHuDiscard && !showClaimBtns && gameView.turnPhase === "claiming" && (
-          <div className="absolute bottom-24 right-34 flex gap-2">
+          <div className="absolute bottom-[18%] right-[15%] flex gap-2">
             <button
               onClick={claimHuFn}
               className="px-5 py-1.5 bg-yellow-600/70 hover:bg-yellow-500/80 rounded-lg font-bold text-white shadow-lg transition-colors text-sm animate-pulse"
@@ -383,7 +376,7 @@ function GameView({
         )}
 
         {showClaimBtns && (
-          <div className="absolute bottom-24 right-34 flex gap-2">
+          <div className="absolute bottom-[18%] right-[15%] flex gap-2">
             {canHuDiscard && (
               <button
                 onClick={claimHuFn}
@@ -432,7 +425,7 @@ function GameView({
 
         {/* Chow sub-selector — pick which combination when multiple exist */}
         {showClaimBtns && multipleChow && (
-          <div className="absolute bottom-36 right-34 flex gap-1 bg-black/60 rounded-lg p-2">
+          <div className="absolute bottom-[26%] right-[15%] flex gap-1 bg-black/60 rounded-lg p-2">
             <span className="text-xs text-gray-400 mr-1 self-center">Pick combo:</span>
             {availableClaims!.chow.map((_opt, i) => (
               <button
@@ -470,16 +463,21 @@ function GameView({
             result={huResult}
             players={gameView.players}
             roomPlayers={room.players}
+            dealer={gameView.dealer}
             onClose={toggleResultOverlay}
-            isHost={isHost}
-            onNextRound={nextRoundFn}
           />
         )}
 
         {/* Round result (draw) */}
         {gameView.roundResult?.type === "draw" && !huResult && resultOverlayVisible && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-lg z-10">
-            <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 text-center relative">
+          <div
+            className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-lg z-10 pointer-events-auto"
+            onClick={toggleResultOverlay}
+          >
+            <div
+              className="bg-gray-900 border border-gray-700 rounded-xl p-6 text-center relative"
+              onClick={(e) => e.stopPropagation()}
+            >
               <button
                 onClick={toggleResultOverlay}
                 className="absolute top-2 right-2 w-7 h-7 flex items-center justify-center rounded-full bg-gray-700/80 hover:bg-gray-600 text-gray-400 hover:text-white transition-colors text-sm"
@@ -487,37 +485,31 @@ function GameView({
               >
                 &times;
               </button>
-              <h2 className="text-xl font-bold text-gray-300 mb-2">Draw</h2>
-              <p className="text-sm text-gray-500 mb-4">Wall exhausted — no winner this round.</p>
-              {isHost ? (
-                <button
-                  onClick={nextRoundFn}
-                  className="px-6 py-2 bg-emerald-700 hover:bg-emerald-600 rounded-lg font-medium text-white transition-colors text-sm"
-                >
-                  Next Round
-                </button>
-              ) : (
-                <p className="text-xs text-gray-500">Waiting for host to start next round...</p>
-              )}
+              <h2 className="text-xl font-bold text-gray-300 mb-2">流局</h2>
+              <p className="text-sm text-gray-500">Wall exhausted — no winner this round.</p>
             </div>
           </div>
         )}
 
-        {/* Show Results button — visible when overlay is dismissed during roundEnd */}
-        {gameView.phase === "roundEnd" && !resultOverlayVisible && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-2 z-10">
-            <button
-              onClick={toggleResultOverlay}
-              className="px-4 py-1.5 bg-gray-800/90 hover:bg-gray-700/90 border border-gray-600 rounded-lg text-sm text-gray-300 hover:text-white shadow-lg transition-colors"
-            >
-              Show Results
-            </button>
+        {/* Round-end toolbar — always visible at top when round has ended */}
+        {gameView.phase === "roundEnd" && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-2 z-20">
+            {!resultOverlayVisible && (
+              <button
+                onClick={toggleResultOverlay}
+                className="px-4 py-1.5 bg-gray-800/90 hover:bg-gray-700/90 border border-gray-600 rounded-lg text-sm text-gray-300 hover:text-white shadow-lg transition-colors"
+              >
+                Show Results
+              </button>
+            )}
             {isHost && (
               <button
                 onClick={nextRoundFn}
-                className="px-4 py-1.5 bg-emerald-700/90 hover:bg-emerald-600/90 rounded-lg text-sm text-white font-medium shadow-lg transition-colors"
+                className={`px-4 py-1.5 rounded-lg text-sm text-white font-medium shadow-lg transition-colors ${
+                  isLastHand ? "bg-amber-700/90 hover:bg-amber-600/90" : "bg-emerald-700/90 hover:bg-emerald-600/90"
+                }`}
               >
-                Next Round
+                {isLastHand ? "End Game" : "Next Round"}
               </button>
             )}
           </div>

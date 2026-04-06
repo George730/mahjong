@@ -3,7 +3,7 @@
 
 import { create } from "zustand";
 import type { Tile, PlayerGameView, TenpaiContext } from "@mahjong/common";
-import { canChow, canPung, canOpenKong, canClosedKong, computeTenpai, faceToIndex, windForSeat } from "@mahjong/common";
+import { canChow, canPung, canOpenKong, canClosedKong, computeTenpai, faceToIndex, seatWind } from "@mahjong/common";
 import type { ChowOption, PungOption, KongOption, ClosedKongOption, HuResultPayload } from "@mahjong/common";
 import type { TypedSocket } from "../services/socket.ts";
 
@@ -116,7 +116,7 @@ function checkHu(hand: Tile[], tileIdx: number, state: PlayerGameView, mySeat: n
 
   const ctx: TenpaiContext = {
     melds: myPlayer.melds,
-    seatWind: windForSeat(mySeat),
+    seatWind: seatWind(mySeat, state.dealer),
     roundWind: state.roundWind,
     bonusTileCount: myPlayer.bonusTiles.length,
     visibleCounts,
@@ -268,10 +268,23 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         }
       }
 
+      // Auto-select tile when entering discard phase:
+      // - drawn tile if present (normal draw)
+      // - rightmost hand tile otherwise (dealer opening, after pung/chow)
+      let autoSelectId: number | null = null;
+      if (mySeat !== null && state.turnPhase === "discard" && state.currentTurn === mySeat) {
+        if (state.drawnTile) {
+          autoSelectId = state.drawnTile.id;
+        } else if (newOrder.length > 0) {
+          autoSelectId = newOrder[newOrder.length - 1];
+        }
+      }
+
       set({
         gameView: state,
         handOrder: newOrder,
         mySeatIndex: mySeat,
+        selectedTileId: autoSelectId,
         error: null,
         availableClaims,
         highlightedTileIds,
@@ -505,7 +518,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     return new Promise((resolve) => {
       socket.emit("game:claimChow", { handTileIds }, (res) => {
         if (!res.ok) set({ error: res.error });
-        else set({ availableClaims: null, highlightedTileIds: [], selectedChowOption: null, selectedTileId: null });
+        else set({ availableClaims: null, highlightedTileIds: [], selectedChowOption: null });
         resolve(res);
       });
     });
@@ -517,7 +530,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     return new Promise((resolve) => {
       socket.emit("game:claimPung", (res) => {
         if (!res.ok) set({ error: res.error });
-        else set({ availableClaims: null, highlightedTileIds: [], selectedChowOption: null, selectedTileId: null });
+        else set({ availableClaims: null, highlightedTileIds: [], selectedChowOption: null });
         resolve(res);
       });
     });
@@ -529,7 +542,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     return new Promise((resolve) => {
       socket.emit("game:claimOpenKong", (res) => {
         if (!res.ok) set({ error: res.error });
-        else set({ availableClaims: null, highlightedTileIds: [], selectedChowOption: null, selectedTileId: null });
+        else set({ availableClaims: null, highlightedTileIds: [], selectedChowOption: null });
         resolve(res);
       });
     });
@@ -541,7 +554,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     return new Promise((resolve) => {
       socket.emit("game:claimClosedKong", { tileIds }, (res) => {
         if (!res.ok) set({ error: res.error });
-        else set({ availableClaims: null, highlightedTileIds: [], selectedChowOption: null, selectedTileId: null });
+        else set({ availableClaims: null, highlightedTileIds: [], selectedChowOption: null });
         resolve(res);
       });
     });

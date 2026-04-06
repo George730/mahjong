@@ -1,7 +1,7 @@
 // Server-side game manager — starts games, persists state to Redis, sends player views
 
 import type { GameState, PendingClaim, ClaimResolution, RoundResult } from "@mahjong/common";
-import { deal, createPlayerView, drawTile, discardTile, declareClosedKong, submitClaim, passClaim, resolveClaims, declareSelfDrawHu } from "@mahjong/common";
+import { deal, createPlayerView, drawTile, discardTile, declareClosedKong, submitClaim, passClaim, resolveClaims, declareSelfDrawHu, getDealerForHand, WIND_ROUND_WINDS, TOTAL_HANDS } from "@mahjong/common";
 import { redis } from "../redis.js";
 
 const GAME_TTL_SECONDS = 4 * 60 * 60; // 4 hours
@@ -27,14 +27,16 @@ export async function deleteGameState(roomCode: string): Promise<void> {
 }
 
 /**
- * Starts a new game: deals tiles, saves state, returns per-player views.
- * Returns a map of seatIndex → PlayerGameView.
+ * Starts a new game: deals tiles for the first hand (东一局).
  */
 export function startGame(
   playerIds: string[],
-  dealer: number = 0,
 ): { gameState: GameState } {
-  const { gameState } = deal(playerIds, dealer);
+  const windRoundIndex = 0;
+  const handIndex = 0;
+  const dealer = getDealerForHand(windRoundIndex, handIndex);
+  const roundWind = WIND_ROUND_WINDS[windRoundIndex];
+  const { gameState } = deal(playerIds, dealer, roundWind, windRoundIndex, handIndex);
   return { gameState };
 }
 
@@ -116,16 +118,31 @@ export function handleClaimHu(
 }
 
 /**
- * Starts the next round: re-deal with the same players, rotating dealer by 1.
+ * Starts the next hand. Advances handIndex within the wind round, or moves
+ * to the next wind round. Returns null if all 16 hands are complete (game over).
  */
-export function startNextRound(gameState: GameState): GameState {
+export function startNextRound(gameState: GameState): GameState | null {
   if (gameState.phase !== "roundEnd") throw new Error("Round has not ended yet");
+
+  let nextWindRound = gameState.windRoundIndex;
+  let nextHand = gameState.handIndex + 1;
+  if (nextHand >= 4) {
+    nextHand = 0;
+    nextWindRound++;
+  }
+
+  // Check if the full game (16 hands) is complete
+  const handNumber = nextWindRound * 4 + nextHand;
+  if (handNumber >= TOTAL_HANDS) {
+    return null; // game over
+  }
 
   const playerIds = gameState.players
     .sort((a, b) => a.seatIndex - b.seatIndex)
     .map((p) => p.userId);
 
-  const nextDealer = (gameState.dealer + 1) % 4;
-  const { gameState: newState } = deal(playerIds, nextDealer);
+  const dealer = getDealerForHand(nextWindRound, nextHand);
+  const roundWind = WIND_ROUND_WINDS[nextWindRound];
+  const { gameState: newState } = deal(playerIds, dealer, roundWind, nextWindRound, nextHand);
   return newState;
 }

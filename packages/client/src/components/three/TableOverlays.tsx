@@ -9,7 +9,7 @@
 import { useMemo, useState } from "react";
 import * as THREE from "three";
 import type { Tile, Meld, PublicPlayerState } from "@mahjong/common";
-import { seatsFromPerspective, windForSeat } from "@mahjong/common";
+import { seatsFromPerspective, seatWind } from "@mahjong/common";
 import { useGameStore } from "../../stores/game-store.ts";
 import { useRoomStore } from "../../stores/room-store.ts";
 import { WIND_CN } from "@mahjong/common";
@@ -597,12 +597,13 @@ export default function TableOverlays() {
     return rp?.username ?? "Player";
   };
 
-  // Winds in viewer-relative order for center indicator
+  // Winds in viewer-relative order for center indicator (dealer-relative)
+  const dealer = gameView.dealer;
   const seatWinds: [string, string, string, string] = [
-    windForSeat(bottomSeat),
-    windForSeat(rightSeat),
-    windForSeat(topSeat),
-    windForSeat(leftSeat),
+    seatWind(bottomSeat, dealer),
+    seatWind(rightSeat, dealer),
+    seatWind(topSeat, dealer),
+    seatWind(leftSeat, dealer),
   ];
 
   // Which viewer-relative index is the current turn?

@@ -7,7 +7,7 @@ import type { FanMatch, WinContext, ScoringMeld, WinSource } from "./scoring/typ
 import { scoreHandFull } from "./scoring/hu.js";
 import { faceToIndex, tilesToCounts } from "./scoring/tile-encoding.js";
 import { meldsToScoringMelds } from "./scoring/tenpai.js";
-import { windForSeat } from "./seat-utils.js";
+import { seatWind, getDealerForHand, WIND_ROUND_WINDS } from "./seat-utils.js";
 
 // --- State machine phases ---
 
@@ -91,9 +91,13 @@ export interface GameState {
   wall: Tile[]; // remaining tiles to draw from (front = index 0)
   players: PlayerState[];
   currentTurn: number; // seatIndex of active player (or discarder during claiming)
-  dealer: number; // seatIndex of the dealer
+  dealer: number; // seatIndex of the dealer (their seat wind is always East)
   roundWind: Wind; // current round wind
   turnCount: number; // how many turns have been taken
+  /** Wind round index (0=east, 1=south, 2=west, 3=north). */
+  windRoundIndex: number;
+  /** Hand index within the current wind round (0–3). */
+  handIndex: number;
   /** The last discarded tile available for claiming, or null. */
   lastDiscard: { tile: Tile; fromSeat: number } | null;
   /** Seat indices that have passed on the current claiming window. */
@@ -132,6 +136,10 @@ export interface PlayerGameView {
   dealer: number;
   roundWind: Wind;
   turnCount: number;
+  /** Wind round index (0=east, 1=south, 2=west, 3=north). */
+  windRoundIndex: number;
+  /** Hand index within the current wind round (0–3). */
+  handIndex: number;
   /** The last discarded tile available for claiming, or null. */
   lastDiscard: { tile: Tile; fromSeat: number } | null;
   /** Round result (scoring breakdown) when phase is "roundEnd". */
@@ -144,17 +152,20 @@ export interface DealResult {
   gameState: GameState;
 }
 
-// Re-export for backwards compatibility — canonical definition is in seat-utils.ts
-export { windForSeat as seatWind } from "./seat-utils.js";
-
 // --- Deal logic ---
 
 /**
  * Creates a new game state by shuffling tiles and dealing to 4 players.
- * Dealer (seat 0 = East by default) gets 14 tiles, others get 13.
+ * Dealer gets 14 tiles, others get 13.
  * Bonus tiles (seasons/flowers) are automatically replaced from the wall end.
  */
-export function deal(playerIds: string[], dealer: number = 0, roundWind: Wind = "east"): DealResult {
+export function deal(
+  playerIds: string[],
+  dealer: number = 0,
+  roundWind: Wind = "east",
+  windRoundIndex: number = 0,
+  handIndex: number = 0,
+): DealResult {
   if (playerIds.length !== 4) {
     throw new Error("Exactly 4 players are required");
   }
@@ -213,6 +224,8 @@ export function deal(playerIds: string[], dealer: number = 0, roundWind: Wind = 
     dealer,
     roundWind,
     turnCount: 0,
+    windRoundIndex,
+    handIndex,
     lastDiscard: null,
     claimPasses: [],
     pendingClaims: [],
@@ -743,7 +756,7 @@ function buildWinContextFromGame(
   return {
     winTile: winTileIdx,
     winSource,
-    seatWind: windForSeat(seatIndex),
+    seatWind: seatWind(seatIndex, gameState.dealer),
     roundWind: gameState.roundWind,
     seatIndex,
     isDealer: seatIndex === gameState.dealer,
@@ -883,6 +896,8 @@ export function createPlayerView(gameState: GameState, seatIndex: number): Playe
     dealer: gameState.dealer,
     roundWind: gameState.roundWind,
     turnCount: gameState.turnCount,
+    windRoundIndex: gameState.windRoundIndex,
+    handIndex: gameState.handIndex,
     lastDiscard: gameState.lastDiscard,
     roundResult: gameState.roundResult,
   };

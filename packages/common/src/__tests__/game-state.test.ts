@@ -1,7 +1,8 @@
 // Unit tests for game state, deal logic, and flower/season replacement
 
 import { describe, it, expect } from "vitest";
-import { deal, createPlayerView, seatWind } from "../game-state.js";
+import { deal, createPlayerView } from "../game-state.js";
+import { windForSeat } from "../seat-utils.js";
 import { isBonusTile, createFullSet } from "../tiles.js";
 
 const PLAYER_IDS = ["p1", "p2", "p3", "p4"];
@@ -226,11 +227,11 @@ describe("createPlayerView", () => {
   });
 });
 
-describe("seatWind", () => {
+describe("windForSeat", () => {
   it("maps seat indices to winds", () => {
-    expect(seatWind(0)).toBe("east");
-    expect(seatWind(1)).toBe("south");
-    expect(seatWind(2)).toBe("west");
-    expect(seatWind(3)).toBe("north");
+    expect(windForSeat(0)).toBe("east");
+    expect(windForSeat(1)).toBe("south");
+    expect(windForSeat(2)).toBe("west");
+    expect(windForSeat(3)).toBe("north");
   });
 });

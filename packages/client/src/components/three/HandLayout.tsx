@@ -292,14 +292,9 @@ function OpponentHand({
     return config.position(displaySlot);
   };
 
-  // Position for opponent's drawn tile: after the last hand tile with a gap.
   const angle = SIDE_ANGLES[side as keyof typeof SIDE_ANGLES];
-  const drawnTilePos: [number, number, number] = rotateAroundY(
-    [ROW_LEFT + player.handCount * GAP + DRAWN_TILE_GAP, 0, TABLE_EDGE],
-    angle,
-  );
 
-  // Revealed mode: lay tiles flat with face visible
+  // Revealed mode: tiles laid flat (face up) with characters oriented toward their own player
   if (isRevealed) {
     return (
       <group>
@@ -307,9 +302,9 @@ function OpponentHand({
           <TileMesh
             key={`${side}-rev-${tile.id}`}
             face={tile.face}
+            flat
             position={config.position(i)}
             rotationY={config.rotationY}
-            flat
             interactive={false}
           />
         ))}
@@ -317,9 +312,9 @@ function OpponentHand({
           <TileMesh
             key={`${side}-rev-drawn`}
             face={revealedDrawnTile.face}
-            position={drawnTilePos}
-            rotationY={config.rotationY}
             flat
+            position={config.position(revealedHand.length)}
+            rotationY={config.rotationY}
             highlighted
             interactive={false}
           />
@@ -328,12 +323,19 @@ function OpponentHand({
     );
   }
 
+  // Normal play: opponent tiles standing, drawn tile shown with a gap
+  // Position for opponent's drawn tile: after the last hand tile with a gap.
+  const drawnTilePos: [number, number, number] = rotateAroundY(
+    [ROW_LEFT + player.handCount * GAP + DRAWN_TILE_GAP, 0, TABLE_EDGE],
+    angle,
+  );
+
   return (
     <group>
-      {tileOrder.map((tileId, slot) => (
+      {Array.from({ length: player.handCount }, (_, slot) => (
         <TileMesh
-          key={`${side}-${tileId}`}
-          position={getPosition(slot)}
+          key={`${side}-${tileOrder[slot] ?? slot}`}
+          position={config.position(slot)}
           rotationY={config.rotationY}
           flat={false}
           selected={selectedPos === slot}
@@ -341,7 +343,6 @@ function OpponentHand({
           interactive={false}
         />
       ))}
-      {/* Opponent's drawn tile — shown with a gap */}
       {player.hasDrawnTile && (
         <TileMesh
           key={`${side}-drawn`}
@@ -369,7 +370,7 @@ export default function HandLayout() {
 
   if (!gameView || mySeatIndex === null) return null;
 
-  const isRoundEnd = gameView.phase === "roundEnd";
+  const isRoundEnd = gameView.phase === "roundEnd" || gameView.phase === "gameEnd";
 
   // Build ordered tile list from handOrder IDs
   const tileById = new Map(gameView.hand.map((t) => [t.id, t]));

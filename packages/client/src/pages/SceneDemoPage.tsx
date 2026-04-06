@@ -177,7 +177,7 @@ function buildMockState(scenario: DemoScenario): {
         mockView: {
           phase: "playing", turnPhase: "discard", hand, drawnTile: null,
           bonusTiles: myBonus, players: basePlayers(14), wallCount: 88,
-          currentTurn: 0, dealer: 0, roundWind: "east", turnCount: 0, lastDiscard: null,
+          currentTurn: 0, dealer: 0, roundWind: "east", windRoundIndex: 0, handIndex: 0, turnCount: 0, lastDiscard: null,
           roundResult: null,
         },
         handOrder: hand.map((t) => t.id),
@@ -207,7 +207,7 @@ function buildMockState(scenario: DemoScenario): {
         mockView: {
           phase: "playing", turnPhase: "claiming", hand, drawnTile: null,
           bonusTiles: myBonus, players, wallCount: 86,
-          currentTurn: 3, dealer: 0, roundWind: "east", turnCount: 1,
+          currentTurn: 3, dealer: 0, roundWind: "east", windRoundIndex: 0, handIndex: 0, turnCount: 1,
           lastDiscard: { tile: discardTile, fromSeat: 3 },
           roundResult: null,
         },
@@ -238,7 +238,7 @@ function buildMockState(scenario: DemoScenario): {
         mockView: {
           phase: "playing", turnPhase: "claiming", hand, drawnTile: null,
           bonusTiles: myBonus, players, wallCount: 85,
-          currentTurn: 1, dealer: 0, roundWind: "east", turnCount: 2,
+          currentTurn: 1, dealer: 0, roundWind: "east", windRoundIndex: 0, handIndex: 0, turnCount: 2,
           lastDiscard: { tile: discardTile, fromSeat: 1 },
           roundResult: null,
         },
@@ -267,7 +267,7 @@ function buildMockState(scenario: DemoScenario): {
         mockView: {
           phase: "playing", turnPhase: "claiming", hand, drawnTile: null,
           bonusTiles: myBonus, players, wallCount: 84,
-          currentTurn: 2, dealer: 0, roundWind: "east", turnCount: 3,
+          currentTurn: 2, dealer: 0, roundWind: "east", windRoundIndex: 0, handIndex: 0, turnCount: 3,
           lastDiscard: { tile: discardTile, fromSeat: 2 },
           roundResult: null,
         },
@@ -296,7 +296,7 @@ function buildMockState(scenario: DemoScenario): {
         mockView: {
           phase: "playing", turnPhase: "discard", hand, drawnTile,
           bonusTiles: myBonus, players, wallCount: 83,
-          currentTurn: 0, dealer: 0, roundWind: "east", turnCount: 4,
+          currentTurn: 0, dealer: 0, roundWind: "east", windRoundIndex: 0, handIndex: 0, turnCount: 4,
           lastDiscard: null, roundResult: null,
         },
         handOrder: hand.map((t) => t.id),
@@ -324,7 +324,7 @@ function buildMockState(scenario: DemoScenario): {
         mockView: {
           phase: "playing", turnPhase: "discard", hand, drawnTile: null,
           bonusTiles: myBonus, players: basePlayers(hand.length, melds), wallCount: 80,
-          currentTurn: 0, dealer: 0, roundWind: "east", turnCount: 5, lastDiscard: null,
+          currentTurn: 0, dealer: 0, roundWind: "east", windRoundIndex: 0, handIndex: 0, turnCount: 5, lastDiscard: null,
           roundResult: null,
         },
         handOrder: hand.map((t) => t.id),
@@ -346,7 +346,7 @@ function buildMockState(scenario: DemoScenario): {
         mockView: {
           phase: "playing", turnPhase: "discard", hand, drawnTile: null,
           bonusTiles: myBonus, players: basePlayers(hand.length, melds), wallCount: 79,
-          currentTurn: 0, dealer: 0, roundWind: "east", turnCount: 6, lastDiscard: null,
+          currentTurn: 0, dealer: 0, roundWind: "east", windRoundIndex: 0, handIndex: 0, turnCount: 6, lastDiscard: null,
           roundResult: null,
         },
         handOrder: hand.map((t) => t.id),
@@ -368,7 +368,7 @@ function buildMockState(scenario: DemoScenario): {
         mockView: {
           phase: "playing", turnPhase: "discard", hand, drawnTile: null,
           bonusTiles: myBonus, players: basePlayers(hand.length, melds), wallCount: 77,
-          currentTurn: 0, dealer: 0, roundWind: "east", turnCount: 7, lastDiscard: null,
+          currentTurn: 0, dealer: 0, roundWind: "east", windRoundIndex: 0, handIndex: 0, turnCount: 7, lastDiscard: null,
           roundResult: null,
         },
         handOrder: hand.map((t) => t.id),
@@ -390,7 +390,7 @@ function buildMockState(scenario: DemoScenario): {
         mockView: {
           phase: "playing", turnPhase: "discard", hand, drawnTile: null,
           bonusTiles: myBonus, players: basePlayers(hand.length, melds), wallCount: 76,
-          currentTurn: 0, dealer: 0, roundWind: "east", turnCount: 8, lastDiscard: null,
+          currentTurn: 0, dealer: 0, roundWind: "east", windRoundIndex: 0, handIndex: 0, turnCount: 8, lastDiscard: null,
           roundResult: null,
         },
         handOrder: hand.map((t) => t.id),
@@ -406,7 +406,7 @@ function buildMockState(scenario: DemoScenario): {
         mockView: {
           phase: "playing", turnPhase: "discard", hand, drawnTile: null,
           bonusTiles: myBonus, players: basePlayers(14), wallCount: 88,
-          currentTurn: 0, dealer: 0, roundWind: "east", turnCount: 0, lastDiscard: null,
+          currentTurn: 0, dealer: 0, roundWind: "east", windRoundIndex: 0, handIndex: 0, turnCount: 0, lastDiscard: null,
           roundResult: null,
         },
         handOrder: hand.map((t) => t.id),
@@ -492,7 +492,7 @@ function buildHuMockState(testScenario: TestScenario): {
       hand: handTiles, drawnTile,
       bonusTiles, players, wallCount: testScenario.ctx.wallCount ?? 40,
       currentTurn: 0, dealer: 0, roundWind: testScenario.ctx.roundWind ?? "east",
-      turnCount: 10, lastDiscard: null,
+      windRoundIndex: 0, handIndex: 0, turnCount: 10, lastDiscard: null,
       roundResult,
     },
     handOrder: handTiles.map((t) => t.id),

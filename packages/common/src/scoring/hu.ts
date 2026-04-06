@@ -117,9 +117,8 @@ export function completeHuFromTenpai(
     let fanScore = scoreFans(fans);
     const bonusScore = context.bonusTileCount;
 
-    // Handle 无番和: if no pattern fans (花牌 is bonus, not a pattern fan), score 8
-    const patternFans = fans.filter(f => f.fan !== "花牌");
-    if (patternFans.length === 0) {
+    // Handle 无番和: if no pattern fans at all, score 8
+    if (fans.length === 0) {
       fans = [{ fan: "无番和", score: 8, count: 1, involvedMelds: [], involvedPair: false }];
       fanScore = 8;
     }
@@ -133,7 +132,8 @@ export function completeHuFromTenpai(
 
   if (!bestResult) return { isWin: false, reason: "no-valid-decomposition" };
 
-  if (bestResult.totalScore < 8) {
+  // 8-point minimum is based on fan score only — bonus (花牌) does not count
+  if (bestResult.fanScore < 8) {
     return { isWin: false, reason: "insufficient-fan", bestScore: bestResult.totalScore };
   }
 
@@ -163,9 +163,8 @@ export function scoreHandFull(
     let fanScore = score;
     const bonusScore = context.bonusTileCount;
 
-    // Handle 无番和: if no pattern fans (花牌 is bonus, not a pattern fan), score 8
-    const patternFans = finalFans.filter(f => f.fan !== "花牌");
-    if (patternFans.length === 0) {
+    // Handle 无番和: if no pattern fans at all, score 8
+    if (finalFans.length === 0) {
       finalFans = [{ fan: "无番和", score: 8, count: 1, involvedMelds: [], involvedPair: false }];
       fanScore = 8;
     }
@@ -179,7 +178,8 @@ export function scoreHandFull(
 
   if (!bestResult) return { isWin: false, reason: "no-valid-decomposition" };
 
-  if (bestResult.totalScore < 8) {
+  // 8-point minimum is based on fan score only — bonus (花牌) does not count
+  if (bestResult.fanScore < 8) {
     return { isWin: false, reason: "insufficient-fan", bestScore: bestResult.totalScore };
   }
 

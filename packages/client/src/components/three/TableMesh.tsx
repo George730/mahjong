@@ -2,7 +2,7 @@
 // The table lies in the XZ plane at Y=0.
 
 import * as THREE from "three";
-import { useMemo } from "react";
+import { useMemo, useRef, useEffect } from "react";
 
 // Table dimensions (world units)
 const TABLE_SIZE = 10;
@@ -12,6 +12,31 @@ const BORDER_HEIGHT = 0.25;
 // Materials (created once, shared across instances)
 const feltColor = new THREE.Color("#1a5c38");
 const woodColor = new THREE.Color("#8b6914");
+
+/** A thin line between two 3D points, rendered just above the felt surface. */
+function DiagonalLine({ from, to }: { from: [number, number, number]; to: [number, number, number] }) {
+  const ref = useRef<THREE.Line>(null!);
+  const geometry = useMemo(() => {
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(...from),
+      new THREE.Vector3(...to),
+    ]);
+    return geo;
+  }, [from, to]);
+  const material = useMemo(
+    () => new THREE.LineBasicMaterial({ color: 0xffffff, opacity: 0.12, transparent: true }),
+    [],
+  );
+
+  useEffect(() => {
+    return () => {
+      geometry.dispose();
+      material.dispose();
+    };
+  }, [geometry, material]);
+
+  return <primitive ref={ref} object={new THREE.Line(geometry, material)} />;
+}
 
 export default function TableMesh() {
   const { feltMaterial, woodMaterial } = useMemo(() => {
@@ -88,6 +113,10 @@ export default function TableMesh() {
       >
         <boxGeometry args={[bw, bh, TABLE_SIZE]} />
       </mesh>
+
+      {/* Diagonal lines connecting opposite corners */}
+      <DiagonalLine from={[-half, 0.005, -half]} to={[half, 0.005, half]} />
+      <DiagonalLine from={[half, 0.005, -half]} to={[-half, 0.005, half]} />
 
       {/* Corner blocks (fill the 4 corners) */}
       {[

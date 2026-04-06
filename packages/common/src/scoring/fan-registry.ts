@@ -17,7 +17,7 @@ import { jianKe, shuangJianKe, daSanYuan, xiaoSanYuan, sanFengKe, daSiXi, xiaoSi
 // Category G: Waits
 import { danDiaoJiang, bianZhang, kanZhang } from "./detectors/waits.js";
 // Category H: Situational
-import { ziMo, huaPai, miaoShouHuiChun, haiDiLaoYue, heDiLaoYu, gangShangKaiHua, qiangGangHu, huJueZhang } from "./detectors/situational.js";
+import { ziMo, miaoShouHuiChun, haiDiLaoYue, heDiLaoYu, gangShangKaiHua, qiangGangHu, huJueZhang } from "./detectors/situational.js";
 // Category I: Special
 import { siGuiYi, qiDui, lianQiDui, shiSanYao, quanBuKao, zuHeLong, qiXingBuKao, jiuLianBaoDeng, wuFanHu } from "./detectors/special.js";
 
@@ -128,5 +128,4 @@ export const FAN_REGISTRY: FanDef[] = [
   { id: "坎张", score: 1, detector: kanZhang, excludes: [], situational: false },
   { id: "单钓将", score: 1, detector: danDiaoJiang, excludes: [], situational: false },
   { id: "自摸", score: 1, detector: ziMo, excludes: [], situational: true },
-  { id: "花牌", score: 1, detector: huaPai, excludes: [], situational: true },
 ];

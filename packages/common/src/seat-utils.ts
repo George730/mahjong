@@ -38,8 +38,42 @@ export function seatsFromPerspective(viewerSeat: number): [number, number, numbe
 }
 
 /**
- * Returns the wind for a given seat index.
+ * Returns the wind for a given seat index (assumes dealer is always seat 0).
+ * @deprecated Use seatWind(seatIndex, dealer) for dealer-relative wind.
  */
 export function windForSeat(seatIndex: number): Wind {
   return SEAT_WINDS[seatIndex];
+}
+
+/**
+ * Returns the seat wind for a given seat index relative to the dealer.
+ * The dealer's wind is always East; subsequent seats are South, West, North.
+ */
+export function seatWind(seatIndex: number, dealer: number): Wind {
+  return SEAT_WINDS[((seatIndex - dealer) + 4) % 4];
+}
+
+// --- Wind round rotation table ---
+
+/**
+ * Dealer order for each wind round. Index = wind round (0=east, 1=south, 2=west, 3=north).
+ * Each sub-array lists the player index who deals in hands 1–4 of that round.
+ */
+export const WIND_ROUND_DEALER_ORDER: readonly [number, number, number, number][] = [
+  [0, 1, 2, 3], // East round
+  [1, 0, 3, 2], // South round
+  [2, 3, 1, 0], // West round
+  [3, 2, 0, 1], // North round
+];
+
+export const WIND_ROUND_WINDS: readonly Wind[] = ["east", "south", "west", "north"];
+
+/** Total number of hands in a full game. */
+export const TOTAL_HANDS = 16;
+
+/**
+ * Returns the dealer player index for a given wind round and hand within that round.
+ */
+export function getDealerForHand(windRoundIndex: number, handIndex: number): number {
+  return WIND_ROUND_DEALER_ORDER[windRoundIndex][handIndex];
 }

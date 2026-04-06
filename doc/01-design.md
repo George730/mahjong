@@ -58,6 +58,27 @@ Seasons and Flowers are bonus tiles — drawn and immediately set aside, replace
 3. Other players may intercept a discard (Pung/Kong/Win take priority over Chow).
 4. Hand ends when a player wins or the wall is exhausted (draw/流局).
 
+### 4.2.1 Wind Rounds & Hand Rotation
+
+A full game consists of **16 hands (局)** divided into four **wind rounds (风圈)**:
+East (东风), South (南风), West (西风), North (北风), played in that order.
+Each wind round has 4 hands (e.g. 东一局 through 东四局).
+
+Players are indexed 0–3 at room join time. Each wind round defines a **dealer order** — the sequence in which players serve as dealer across the 4 hands of that round:
+
+| Wind Round | Dealer Order (手1→手4) |
+|------------|----------------------|
+| East (东风) | 0, 1, 2, 3 |
+| South (南风) | 1, 0, 3, 2 |
+| West (西风) | 2, 3, 1, 0 |
+| North (北风) | 3, 2, 0, 1 |
+
+**Seat wind assignment**: The dealer's seat wind is always **East (东)**. Other players' winds follow clockwise from the dealer: the next player in seat order is South (南), then West (西), then North (北). Formally: `seatWind(seat) = WINDS[(seat − dealer + 4) mod 4]`.
+
+**Round wind**: The wind of the current round (east/south/west/north) affects scoring (e.g. 圈风 fans). It is the same for all 4 hands within a wind round.
+
+The game ends after all 16 hands are played.
+
 ### 4.3 Scoring
 - Chinese Official scoring: 81 recognized fan (番) patterns.
 - Minimum 8 fan required to declare a win.
